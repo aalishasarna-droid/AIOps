@@ -6,9 +6,10 @@ import { Sparkles, ShieldCheck } from "lucide-react";
 interface StackScanLoaderProps {
   isOpen: boolean;
   scenarioTitle?: string;
+  activeModelLabel?: string;
 }
 
-export default function StackScanLoader({ isOpen, scenarioTitle }: StackScanLoaderProps) {
+export default function StackScanLoader({ isOpen, scenarioTitle, activeModelLabel }: StackScanLoaderProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const statusRef = useRef<HTMLParagraphElement | null>(null);
   const pctRef = useRef<HTMLDivElement | null>(null);
@@ -250,7 +251,7 @@ export default function StackScanLoader({ isOpen, scenarioTitle }: StackScanLoad
         {/* Top Header Badge */}
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#6CC3FF]/10 border border-[#6CC3FF]/30 text-[#6CC3FF] text-[11px] font-mono-code font-bold tracking-wider uppercase mb-3">
           <Sparkles className="w-3.5 h-3.5 animate-pulse" />
-          <span>Gemini 3.5 Flash Active Reasoning</span>
+          <span>{activeModelLabel || "Gemini 3.5 Flash Active Reasoning"}</span>
         </div>
 
         <h2 className="text-xl font-extrabold tracking-tight text-white m-0">

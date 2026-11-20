@@ -22,10 +22,11 @@ class IncidentNarrator:
     def __init__(self, llm_client: Optional[LLMClient] = None):
         self.llm = llm_client or GeminiClient()
 
-    def generate_explanation(self, incident_dict: dict[str, Any]) -> dict[str, Any]:
+    def generate_explanation(self, incident_dict: dict[str, Any], llm_client: Optional[LLMClient] = None) -> dict[str, Any]:
         """
         Turn incident dictionary into full explainability response matching architecture §7.4.
         """
+        client = llm_client or self.llm
         root = incident_dict.get("root_cause_candidate", "unknown")
         confidence = incident_dict.get("confidence", 0.8)
         signals = incident_dict.get("signals", [])
@@ -65,7 +66,7 @@ class IncidentNarrator:
         }
 
         # Request narration from LLM (or deterministic fallback)
-        llm_resp = self.llm.explain(evidence)
+        llm_resp = client.explain(evidence)
 
         # Grounding check: Ensure mentioned entities exist in evidence
         grounded = True

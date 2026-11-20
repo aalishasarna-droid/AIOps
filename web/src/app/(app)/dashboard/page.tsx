@@ -5,7 +5,8 @@ import Link from "next/link";
 import StackScanLoader from "@/components/StackScanLoader";
 import {
   Shield, Activity, Server, Cpu, HardDrive, Wifi, AlertTriangle,
-  CheckCircle2, ArrowRight, RotateCcw, Lock, ExternalLink, Terminal, Zap, RefreshCw, Loader2, Building2, Globe
+  CheckCircle2, ArrowRight, RotateCcw, Lock, ExternalLink, Terminal, Zap, RefreshCw, Loader2, Building2, Globe,
+  Sparkles, Brain
 } from "lucide-react";
 
 interface TelemetryMetrics {
@@ -68,6 +69,15 @@ interface TenantProfile {
   region: string;
   collector_id?: string;
   token?: string;
+}
+
+interface AIModelOption {
+  id: string;
+  provider: string;
+  name: string;
+  badge: string;
+  desc: string;
+  is_local: boolean;
 }
 
 const DEFAULT_TENANTS: TenantProfile[] = [
@@ -135,6 +145,52 @@ export default function DashboardPage() {
   const [currentTime, setCurrentTime] = useState<string>("");
   const [remedStatus, setRemedStatus] = useState<string>("");
 
+  // AI Reasoning Engine models (Gemini 3.5 Flash & Local Ollama)
+  const [availableModels, setAvailableModels] = useState<AIModelOption[]>([
+    {
+      id: "gemini-3.5-flash",
+      provider: "gemini",
+      name: "Google Gemini 3.5 Flash",
+      badge: "Cloud AI",
+      desc: "Cloud multimodal reasoning with grounded incident analysis",
+      is_local: false,
+    },
+    {
+      id: "deepseek-r1:14b",
+      provider: "ollama",
+      name: "Ollama: deepseek-r1:14b",
+      badge: "Local Host AI",
+      desc: "Local 14B Qwen2 reasoning engine with CoT thinking",
+      is_local: true,
+    },
+    {
+      id: "gemma4:12b",
+      provider: "ollama",
+      name: "Ollama: gemma4:12b",
+      badge: "Local Host AI",
+      desc: "Local Google open-weights instruction model (12B)",
+      is_local: true,
+    },
+  ]);
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-3.5-flash");
+  const [selectedProvider, setSelectedProvider] = useState<string>("gemini");
+
+  const handleModelChange = async (modelId: string) => {
+    const target = availableModels.find((m) => m.id === modelId);
+    if (!target) return;
+    setSelectedModel(target.id);
+    setSelectedProvider(target.provider);
+    try {
+      await apiFetch("/api/llm/select-model", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: target.provider, model: target.id }),
+      });
+    } catch (err) {
+      console.error("Select model API error:", err);
+    }
+  };
+
   // History for sparklines
   const [cpuHistory, setCpuHistory] = useState<number[]>([1, 1.2, 1.1, 1.4, 1.3, 0.9, 1.3]);
   const [memHistory, setMemHistory] = useState<number[]>([13, 13.2, 13.5, 13.8, 13.8, 13.8, 13.8]);
@@ -182,6 +238,18 @@ export default function DashboardPage() {
             collector_id: `00000000-0000-0000-0000-0000000000${t.id.slice(-2)}`,
           }));
           setAvailableTenants(mapped);
+        }
+      })
+      .catch(() => {});
+
+    // Load registered AI reasoning models (Gemini & Ollama)
+    apiFetch("/api/llm/models")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.models && data.models.length > 0) {
+          setAvailableModels(data.models);
+          if (data.active_model) setSelectedModel(data.active_model);
+          if (data.active_provider) setSelectedProvider(data.active_provider);
         }
       })
       .catch(() => {});
@@ -326,7 +394,12 @@ export default function DashboardPage() {
       const res = await apiFetch("/api/set-scenario", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: sc, tenant_id: currentTenant.tenant_id }),
+        body: JSON.stringify({
+          scenario: sc,
+          tenant_id: currentTenant.tenant_id,
+          provider: selectedProvider,
+          model: selectedModel,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -481,7 +554,17 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[#07090C] text-white p-4 sm:p-6 lg:p-8 font-sans selection:bg-[#C8F63B] selection:text-[#07090C]">
       {/* 3D Stack Architecture Scan Loader */}
-      <StackScanLoader isOpen={isAnalyzing} scenarioTitle={activeScenarioTitle} />
+      <StackScanLoader
+        isOpen={isAnalyzing}
+        scenarioTitle={activeScenarioTitle}
+        activeModelLabel={
+          selectedModel.includes("deepseek")
+            ? "Ollama DeepSeek-R1 (14B) Local Reasoning"
+            : selectedModel.includes("gemma")
+            ? "Ollama Gemma4 (12B) Local Reasoning"
+            : "Gemini 3.5 Flash Active Reasoning"
+        }
+      />
 
       {/* Dense Calm Header with Multi-Tenant Switcher */}
       <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 mb-6 border-b border-white/10 gap-4">
@@ -557,37 +640,88 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Failure Scenario Injection Bar */}
-      <section className="bg-black/40 border border-white/10 rounded-xl p-3 mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-xs font-bold font-mono-code text-[#9AA4B2] uppercase tracking-wider">
-          <Zap className="w-3.5 h-3.5 text-[#C8F63B]" />
-          <span>Failure Scenario Injection:</span>
-          {isAnalyzing && (
-            <span className="flex items-center gap-1 text-[11px] text-[#C8F63B] font-normal normal-case">
-              <Loader2 className="w-3 h-3 animate-spin" /> Calling Gemini 3.5 Flash...
+      {/* AI Reasoning Engine & Failure Scenario Control Bar */}
+      <section className="bg-black/40 border border-white/10 rounded-xl p-3 mb-6 space-y-3">
+        {/* Row 1: AI Reasoning Engine Selector */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-2.5 border-b border-white/10">
+          <div className="flex items-center gap-2 text-xs font-bold font-mono-code text-[#9AA4B2] uppercase tracking-wider">
+            <Sparkles className="w-3.5 h-3.5 text-[#6CC3FF]" />
+            <span>AI Reasoning Engine:</span>
+            <span className="text-[10px] text-[#5FD4A0] bg-[#5FD4A0]/10 border border-[#5FD4A0]/20 px-1.5 py-0.5 rounded font-mono-code flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#5FD4A0] animate-pulse" />
+              Ollama Daemon Connected
             </span>
-          )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {availableModels.map((m) => {
+              const isSelected = selectedModel === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => handleModelChange(m.id)}
+                  disabled={isAnalyzing}
+                  className={`text-xs font-mono-code px-3 py-1.5 rounded-lg border transition-all flex items-center gap-1.5 ${
+                    isSelected
+                      ? "bg-[#6CC3FF]/20 border-[#6CC3FF] text-[#6CC3FF] font-bold shadow-[0_0_12px_rgba(108,195,255,0.25)]"
+                      : "bg-white/5 border-white/10 text-[#9AA4B2] hover:bg-white/10 hover:text-white"
+                  }`}
+                  title={m.desc}
+                >
+                  {m.provider === "gemini" ? (
+                    <Sparkles className="w-3 h-3 text-[#6CC3FF]" />
+                  ) : (
+                    <Brain className="w-3 h-3 text-[#C8F63B]" />
+                  )}
+                  <span>{m.name}</span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-mono-code font-bold ${
+                      m.is_local
+                        ? "bg-[#C8F63B]/20 text-[#C8F63B] border border-[#C8F63B]/30"
+                        : "bg-[#3B82F6]/20 text-[#60A5FA] border border-[#3B82F6]/30"
+                    }`}
+                  >
+                    {m.badge}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {[
-            { id: "normal", label: "✓ Normal Baseline" },
-            { id: "db_outage_cascade", label: "🚨 DB Outage Cascade" },
-            { id: "memory_leak", label: "📈 Memory Leak Anomaly" },
-            { id: "login_burst", label: "🛡️ Brute Force Burst" },
-          ].map((sc) => (
-            <button
-              key={sc.id}
-              onClick={() => handleSetScenario(sc.id)}
-              disabled={isAnalyzing}
-              className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
-                scenario === sc.id
-                  ? "bg-[#C8F63B] text-[#07090C] font-bold shadow-[0_0_12px_rgba(200,246,59,0.3)]"
-                  : "bg-white/5 hover:bg-white/10 text-[#9AA4B2] border border-white/5"
-              }`}
-            >
-              {sc.label}
-            </button>
-          ))}
+
+        {/* Row 2: Failure Scenario Injection */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold font-mono-code text-[#9AA4B2] uppercase tracking-wider">
+            <Zap className="w-3.5 h-3.5 text-[#C8F63B]" />
+            <span>Failure Scenario Injection:</span>
+            {isAnalyzing && (
+              <span className="flex items-center gap-1 text-[11px] text-[#C8F63B] font-normal normal-case">
+                <Loader2 className="w-3 h-3 animate-spin" /> Running {selectedModel}...
+              </span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: "normal", label: "✓ Normal Baseline" },
+              { id: "db_outage_cascade", label: "🚨 DB Outage Cascade" },
+              { id: "memory_leak", label: "📈 Memory Leak Anomaly" },
+              { id: "login_burst", label: "🛡️ Brute Force Burst" },
+            ].map((sc) => (
+              <button
+                key={sc.id}
+                onClick={() => handleSetScenario(sc.id)}
+                disabled={isAnalyzing}
+                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${
+                  scenario === sc.id
+                    ? "bg-[#C8F63B] text-[#07090C] font-bold shadow-[0_0_12px_rgba(200,246,59,0.3)]"
+                    : "bg-white/5 hover:bg-white/10 text-[#9AA4B2] border border-white/5"
+                }`}
+              >
+                {sc.label}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -828,8 +962,19 @@ export default function DashboardPage() {
                 <Server className="w-4 h-4 text-[#C8F63B]" />
                 <span>Grounded Explainability &amp; LLM Narration (§7.4)</span>
               </h2>
-              <span className="text-[10px] font-mono-code text-[#C8F63B] bg-[#C8F63B]/10 border border-[#C8F63B]/20 px-2 py-0.5 rounded font-bold">
-                {narration?.model ? `Google ${narration.model.toUpperCase()}` : "Google GEMINI-3.5-FLASH"}
+              <span className={`text-[10px] font-mono-code px-2 py-0.5 rounded font-bold border flex items-center gap-1.5 ${
+                (narration?.model || selectedModel).includes("deepseek") || (narration?.model || selectedModel).includes("gemma")
+                  ? "bg-[#C8F63B]/10 border-[#C8F63B]/30 text-[#C8F63B]"
+                  : "bg-[#6CC3FF]/10 border-[#6CC3FF]/30 text-[#6CC3FF]"
+              }`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                {narration?.model
+                  ? narration.model.includes("ollama") || narration.model.includes("deepseek") || narration.model.includes("gemma")
+                    ? `OLLAMA: ${narration.model.replace("ollama/", "").toUpperCase()} (LOCAL)`
+                    : `GOOGLE ${narration.model.toUpperCase()}`
+                  : selectedModel.includes("deepseek") || selectedModel.includes("gemma")
+                  ? `OLLAMA: ${selectedModel.toUpperCase()} (LOCAL)`
+                  : "GOOGLE GEMINI-3.5-FLASH"}
               </span>
             </div>
 

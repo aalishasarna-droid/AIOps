@@ -135,6 +135,14 @@ import time
 from fastapi import Body
 from saas.detectors.health import FleetHealthEvaluator, HealthState
 from saas.explain.narrator import IncidentNarrator
+from saas.explain.ollama_client import OllamaClient
+from saas.explain.gemini_client import GeminiClient
+from saas.explain.llm_client import TemplateClient
+
+CURRENT_LLM_CONFIG = {
+    "provider": os.getenv("LLM_PROVIDER", "gemini"),
+    "model": os.getenv("LLM_MODEL", "gemini-3.5-flash"),
+}
 
 fleet_evaluator = FleetHealthEvaluator(stale_threshold_s=30.0)
 incident_narrator = IncidentNarrator()
@@ -598,14 +606,99 @@ def live_redact_tester(body: dict[str, Any] = Body(...)):
     }
 
 
+@app.get("/api/llm/models")
+def get_llm_models():
+    """
+    Returns available LLM inference models (Google Cloud Gemini and local Ollama models).
+    """
+    ollama = OllamaClient()
+    installed_ollama = ollama.get_available_models()
+
+    models = [
+        {
+            "id": "gemini-3.5-flash",
+            "provider": "gemini",
+            "name": "Google Gemini 3.5 Flash",
+            "badge": "Cloud AI",
+            "desc": "Ultra-fast cloud multimodal reasoning with grounded incident analysis",
+            "is_local": False,
+        },
+    ]
+
+    for om in installed_ollama:
+        desc = "Local 14B Qwen2 reasoning engine with CoT thinking" if "deepseek" in om else "Local Google open-weights instruction model (12B)"
+        models.append({
+            "id": om,
+            "provider": "ollama",
+            "name": f"Ollama: {om}",
+            "badge": "Local Host AI",
+            "desc": desc,
+            "is_local": True,
+        })
+
+    models.append({
+        "id": "template-1.0",
+        "provider": "template",
+        "name": "Deterministic Template",
+        "badge": "Air-Gapped",
+        "desc": "Deterministic rule-based explanation without neural inference",
+        "is_local": True,
+    })
+
+    return {
+        "active_provider": CURRENT_LLM_CONFIG["provider"],
+        "active_model": CURRENT_LLM_CONFIG["model"],
+        "models": models,
+    }
+
+
+@app.post("/api/llm/select-model")
+def select_active_llm_model(body: dict[str, Any] = Body(...)):
+    """
+    Switch active LLM inference engine (e.g. Gemini 3.5 Flash, DeepSeek R1 14B, Gemma4 12B).
+    """
+    provider = body.get("provider", "gemini")
+    model = body.get("model", "gemini-3.5-flash")
+
+    CURRENT_LLM_CONFIG["provider"] = provider
+    CURRENT_LLM_CONFIG["model"] = model
+
+    if provider == "ollama":
+        incident_narrator.llm = OllamaClient(model_name=model)
+    elif provider == "gemini":
+        incident_narrator.llm = GeminiClient(model_name=model)
+    else:
+        incident_narrator.llm = TemplateClient()
+
+    logger.info("Active LLM updated to provider=%s, model=%s", provider, model)
+    return {
+        "status": "success",
+        "active_provider": provider,
+        "active_model": model,
+        "message": f"Active AI reasoning engine set to {model} ({provider})",
+    }
+
+
 @app.post("/api/set-scenario")
 def set_active_scenario(body: dict[str, Any] = Body(...)):
     """
     Inject scenario and trigger causal graph traversal and AI explainability.
+    Supports on-demand inference with either Gemini or local Ollama (deepseek-r1:14b, gemma4:12b).
     """
     scenario = body.get("scenario", "normal")
     tenant_id = body.get("tenant_id", "00000000-0000-0000-0000-000000000001")
+    req_provider = body.get("provider", CURRENT_LLM_CONFIG["provider"])
+    req_model = body.get("model", CURRENT_LLM_CONFIG["model"])
+
     LIVE_TELEMETRY["scenario"] = scenario
+
+    # Determine LLM client for this incident narration
+    if req_provider == "ollama":
+        client = OllamaClient(model_name=req_model)
+    elif req_provider == "gemini":
+        client = GeminiClient(model_name=req_model)
+    else:
+        client = TemplateClient()
 
     if scenario == "db_outage_cascade":
         LIVE_TELEMETRY["fleet_state"] = "critical"
@@ -627,7 +720,7 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
                 {"metric": "http_500_rate", "service": "api-gateway", "deviation": 3.5},
             ],
         }
-        explanation = incident_narrator.generate_explanation(incident_dict)
+        explanation = incident_narrator.generate_explanation(incident_dict, llm_client=client)
         LIVE_TELEMETRY["active_incident"] = incident_dict
         LIVE_TELEMETRY["narration"] = explanation
 
@@ -646,7 +739,7 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
                 {"metric": "failed_logins_count", "service": "edge-ingress", "deviation": 5.1},
             ],
         }
-        explanation = incident_narrator.generate_explanation(incident_dict)
+        explanation = incident_narrator.generate_explanation(incident_dict, llm_client=client)
         LIVE_TELEMETRY["active_incident"] = incident_dict
         LIVE_TELEMETRY["narration"] = explanation
 
@@ -667,7 +760,7 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
                 {"metric": "mem_pct", "service": "worker-02", "deviation": 3.4},
             ],
         }
-        explanation = incident_narrator.generate_explanation(incident_dict)
+        explanation = incident_narrator.generate_explanation(incident_dict, llm_client=client)
         LIVE_TELEMETRY["active_incident"] = incident_dict
         LIVE_TELEMETRY["narration"] = explanation
 
