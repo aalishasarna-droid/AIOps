@@ -8,7 +8,7 @@ export default function LandingPage() {
       <iframe
         src="/index.html?v=subtle-atmosphere"
         className="w-full h-full border-0 m-0 p-0 block"
-        title="Ascend — Scale Smarter, Not Harder"
+        title="AIOps Guardian — Private at edge, unified visibility"
         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
       />
     </main>
