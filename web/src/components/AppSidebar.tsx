@@ -15,6 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
+  LogIn,
+  UserPlus,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
 
@@ -94,8 +96,24 @@ export default function AppSidebar({
       ],
     },
     {
-      title: "PORTALS & OVERVIEW",
+      title: "ACCESS & PORTALS",
       items: [
+        {
+          label: "Sign In",
+          sublabel: "Access Tenant Organization",
+          href: "/login?tab=signin",
+          icon: LogIn,
+          badge: "AUTH",
+          badgeColor: "bg-blue-500/15 text-blue-400 border border-blue-500/25",
+        },
+        {
+          label: "Create Account",
+          sublabel: "Enroll New Isolated Org",
+          href: "/login?tab=create",
+          icon: UserPlus,
+          badge: "NEW ORG",
+          badgeColor: "bg-[#C8F63B]/15 text-[#C8F63B] border border-[#C8F63B]/25",
+        },
         {
           label: "Ascend 3D Earth",
           sublabel: "Interactive WebGL Globe",
@@ -103,14 +121,6 @@ export default function AppSidebar({
           icon: Layers,
           badge: "3D",
           badgeColor: "bg-purple-500/15 text-purple-400 border border-purple-500/25",
-        },
-        {
-          label: "Portal Login",
-          sublabel: "Role Switcher & Session",
-          href: "/login",
-          icon: Lock,
-          badge: "AUTH",
-          badgeColor: "bg-zinc-500/15 text-zinc-400 border border-zinc-500/25",
         },
       ],
     },
@@ -291,6 +301,28 @@ export default function AppSidebar({
                   ▼
                 </div>
               </div>
+
+              {/* Quick links to Create Account or Sign In */}
+              <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-[10px] font-mono-code">
+                <Link
+                  href="/login?tab=signin"
+                  onClick={onCloseMobile}
+                  className="text-[#9AA4B2] hover:text-white flex items-center gap-1 transition-colors"
+                  title="Sign In to another organization"
+                >
+                  <LogIn className="w-2.5 h-2.5 text-[#3B82F6]" />
+                  <span>Sign In</span>
+                </Link>
+                <Link
+                  href="/login?tab=create"
+                  onClick={onCloseMobile}
+                  className="text-[#C8F63B] hover:underline flex items-center gap-1 transition-colors font-semibold"
+                  title="Enroll a new enterprise tenant"
+                >
+                  <UserPlus className="w-2.5 h-2.5" />
+                  <span>+ Enroll Tenant</span>
+                </Link>
+              </div>
             </div>
 
             {/* Live Heartbeat Status */}
@@ -317,8 +349,23 @@ export default function AppSidebar({
             </div>
           </>
         ) : (
-          /* Collapsed Footnote Icon */
-          <div className="flex flex-col items-center gap-2 py-1">
+          /* Collapsed Footnote Icons */
+          <div className="flex flex-col items-center gap-2.5 py-1">
+            <Link
+              href="/login?tab=signin"
+              className="p-2 rounded-lg text-[#9AA4B2] hover:text-white hover:bg-white/5 transition-colors"
+              title="Sign In to Tenant"
+            >
+              <LogIn className="w-4 h-4 text-[#3B82F6]" />
+            </Link>
+            <Link
+              href="/login?tab=create"
+              className="p-2 rounded-lg text-[#C8F63B] hover:bg-white/5 transition-colors"
+              title="Create Account / Enroll Tenant"
+            >
+              <UserPlus className="w-4 h-4" />
+            </Link>
+            <div className="w-4 border-t border-white/10 my-0.5" />
             <span
               className={`w-2.5 h-2.5 rounded-full ${
                 fleetState === "critical"

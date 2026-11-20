@@ -516,12 +516,14 @@
       .showcase-copy .btn { margin:24px auto 0; }
       .stats { grid-template-columns:repeat(2,1fr); }
     }
+    .nav-actions { display:flex; align-items:center; gap:10px; }
     @media (max-width:720px) {
       .nav-links { display:none; }
       .nav { padding:18px 20px; }
       .section { padding:clamp(64px,16vw,110px) 20px; }
     }
     @media (max-width:560px) {
+      .nav-actions .btn-ghost { display:none; }
       .feature-grid { grid-template-columns:1fr; }
       .dash-row { grid-template-columns:90px 1fr; }
       .hero-actions .btn { flex:1; width:100%; justify-content:center; }
@@ -558,7 +560,10 @@
           <a href="/dashboard/regions" target="_top">Global Regions</a>
           <a href="/dashboard/privacy" target="_top">Privacy Gate</a>
         </div>
-        <a href="/dashboard" class="btn btn-ghost" target="_top">Launch Console</a>
+        <div class="nav-actions">
+          <a href="/login?tab=signin" class="btn btn-ghost" target="_top" style="padding:9px 18px;font-size:13.5px;">Sign In</a>
+          <a href="/login?tab=create" class="btn btn-primary" target="_top" style="padding:9px 20px;font-size:13.5px;">Create Account</a>
+        </div>
       </nav>
 
       <div class="hero-inner">
@@ -573,7 +578,12 @@
             <span>Launch Fleet Console</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </a>
-          <a href="/dashboard/privacy" class="btn btn-outline" target="_top">Verify Privacy Gate</a>
+          <a href="/login?tab=create" class="btn btn-outline" target="_top" style="border-color:rgba(93,240,168,0.5);color:#7affc2;">
+            <span>Create Free Account</span>
+          </a>
+        </div>
+        <div style="margin-top:16px;font-size:13px;color:rgba(255,255,255,0.75);font-family:'JetBrains Mono',monospace;" data-reveal style="--rd:360ms;">
+          Already registered? <a href="/login?tab=signin" target="_top" style="color:#5df0a8;font-weight:600;text-decoration:underline;margin-left:4px;">Sign in to your organization &rarr;</a>
         </div>
       </div>
 
@@ -759,11 +769,13 @@
         <h2 data-reveal style="--rd:140ms;">Private at edge, unified visibility.</h2>
         <p data-reveal style="--rd:220ms;">Deploy local collector containers in minutes. Guarantee customer data residency and autonomous remediation without leaking a single byte.</p>
         <div class="hero-actions" data-reveal style="--rd:300ms;">
-          <a href="/dashboard" class="btn btn-primary" target="_top">
-            <span>Launch Fleet Dashboard</span>
+          <a href="/login?tab=create" class="btn btn-primary" target="_top">
+            <span>Create Free Account</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </a>
-          <a href="/dashboard/regions" class="btn btn-outline" target="_top">Inspect Global Regions</a>
+          <a href="/login?tab=signin" class="btn btn-outline" target="_top">
+            <span>Sign In to Tenant</span>
+          </a>
         </div>
       </div>
 
@@ -794,11 +806,12 @@
             </ul>
           </div>
           <div class="footer-col">
-            <h4>Security & Privacy</h4>
+            <h4>Access & Security</h4>
             <ul>
+              <li><a href="/login?tab=signin" target="_top">Sign In to Tenant</a></li>
+              <li><a href="/login?tab=create" target="_top">Create Organization</a></li>
               <li><a href="/dashboard/privacy" target="_top">Zero-Leak Privacy Gate</a></li>
               <li><a href="/dashboard/privacy" target="_top">Egress Audit Trail</a></li>
-              <li><a href="/login" target="_top">Operator Login</a></li>
             </ul>
           </div>
         </div>

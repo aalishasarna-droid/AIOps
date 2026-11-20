@@ -14,6 +14,8 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
+  LogIn,
+  UserPlus,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
 
@@ -156,14 +158,26 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
             {currentTime || "18:00:00 UTC"}
           </div>
 
-          {/* Portal Switch */}
-          <Link
-            href="/login"
-            className="text-xs font-semibold bg-white/5 hover:bg-white/10 text-white border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap"
-          >
-            <Lock className="w-3.5 h-3.5 text-[#3B82F6]" />
-            <span className="hidden sm:inline">Portals</span>
-          </Link>
+          {/* Auth: Sign In & Create Account */}
+          <div className="flex items-center gap-1.5">
+            <Link
+              href="/login?tab=signin"
+              className="text-xs font-semibold bg-white/5 hover:bg-white/10 text-[#9AA4B2] hover:text-white border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              title="Sign In to Tenant Organization"
+            >
+              <LogIn className="w-3.5 h-3.5 text-[#3B82F6]" />
+              <span className="hidden sm:inline">Sign In</span>
+            </Link>
+            <Link
+              href="/login?tab=create"
+              className="text-xs font-bold bg-[#C8F63B]/10 hover:bg-[#C8F63B]/20 text-[#C8F63B] border border-[#C8F63B]/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all whitespace-nowrap shadow-[0_0_12px_rgba(200,246,59,0.12)] hover:shadow-[0_0_16px_rgba(200,246,59,0.25)]"
+              title="Create New Tenant Account"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-[#C8F63B]" />
+              <span className="hidden md:inline">Create Account</span>
+              <span className="md:hidden">Join</span>
+            </Link>
+          </div>
         </div>
       </div>
     </header>

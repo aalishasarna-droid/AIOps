@@ -79,8 +79,11 @@ export default function LoginPage() {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const p = new URLSearchParams(window.location.search);
-      if (p.get("tab") === "create" || p.get("tab") === "register") {
+      const tab = p.get("tab") || p.get("mode");
+      if (tab === "create" || tab === "register" || tab === "new") {
         setActiveTab("create");
+      } else if (tab === "signin" || tab === "login" || tab === "auth") {
+        setActiveTab("signin");
       }
     }
   }, []);
