@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Fraunces:ital,opsz,wght@0,9..144,300..800;1,9..144,300..800&family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg: #07090C;          /* midnight black */
+  --surface: #0D1117;     /* dark glass surface */
+  --surface-hover: #151B23;
+  --border: rgba(255, 255, 255, 0.10);
+  --border-subtle: rgba(255, 255, 255, 0.05);
+  --border-glow: rgba(200, 246, 59, 0.25);
+  --text: #FFFFFF;        /* pure white */
+  --text-dim: #9AA4B2;
+  --text-muted: #626E7E;
+  --accent: #C8F63B;      /* lime, CTA only */
+  --accent-glow: rgba(200, 246, 59, 0.2);
+  --ok: #22C55E;          /* green (Excellent) */
+  --good: #3B82F6;        /* blue (Good) */
+  --warn: #F59E0B;        /* amber (Fair) */
+  --bad: #EF4444;         /* red (Poor) */
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Custom Typography classes */
+.font-serif-headline {
+  font-family: 'Instrument Serif', 'Fraunces', Georgia, serif;
+}
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', var(--font-geist-mono), monospace;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(13, 17, 23, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.glass-panel-subtle {
+  background: rgba(13, 17, 23, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+}
+
+.glass-panel:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+/* Beam Spotlight Gradients */
+.spotlight-radial {
+  background: radial-gradient(circle at 50% 0%, rgba(200, 246, 59, 0.08) 0%, rgba(59, 130, 246, 0.04) 35%, transparent 70%);
+}
+
+.spotlight-cone {
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(200, 246, 59, 0.15), transparent);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #07090C;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f293d;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2b3952;
+}
+
+/* Pulsing indicators */
+@keyframes softPulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.95); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+.pulsing-indicator {
+  animation: softPulse 2s infinite ease-in-out;
+}

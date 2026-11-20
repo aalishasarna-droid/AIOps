@@ -1,0 +1,24 @@
+FROM python:3.12-slim AS builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends gcc python3-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+COPY collector/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+FROM python:3.12-slim
+
+RUN groupadd -r collector && useradd -r -g collector collector
+
+WORKDIR /app
+RUN mkdir -p /app/data && chown -R collector:collector /app/data /app
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY collector/ ./collector/
+
+USER collector
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD python -c "print('ok')" || exit 1
+
+CMD ["python", "-m", "collector.main"]

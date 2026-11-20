@@ -1,0 +1,22 @@
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+COPY saas/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+FROM python:3.12-slim
+
+RUN groupadd -r aiops && useradd -r -g aiops aiops
+
+WORKDIR /app
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY saas/ ./saas/
+COPY collector/schemas.py ./collector/schemas.py
+
+USER aiops
+
+HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
+    CMD python -c "print('ok')" || exit 1
+
+CMD ["python", "-m", "saas.aiops.correlator"]

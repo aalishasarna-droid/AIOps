@@ -1,0 +1,159 @@
+# Docker Compose — Secure AIOps Observability Platform
+# Ref: architecture.md §12.1
+#
+# Networks model the trust boundary:
+#   customer_net (internal) — simulator + collector, NO internet
+#   wan_net                 — the link between collector and SaaS (toxiproxy sits here for chaos)
+#   saas_net                — SaaS services + Supabase
+
+services:
+  # ──────────────────── TIER 1: CUSTOMER ENVIRONMENT ────────────────────
+
+  simulator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.simulator
+    env_file: .env
+    environment:
+      - SIMULATOR_SCENARIO=${SIMULATOR_SCENARIO:-normal}
+      - SIMULATOR_INTERVAL_S=${SIMULATOR_INTERVAL_S:-5}
+    networks:
+      - customer_net
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.collector
+    env_file: .env
+    environment:
+      - INGEST_URL=http://ingest-api:8000
+      - COLLECTOR_ID=${COLLECTOR_ID:-col-local-01}
+    volumes:
+      - collector_raw:/app/data  # raw store — mounted ONLY here
+      - ./collector:/app/collector
+    ports:
+      - "8080:8080"
+    networks:
+      - customer_net
+      - wan_net
+    depends_on:
+      ingest-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────── TIER 2: CENTRAL SAAS ────────────────────────────
+
+  ingest-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ingest
+    env_file: .env
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    command: ["uvicorn", "saas.ingest_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./saas:/app/saas
+      - ./web:/app/web
+    networks:
+      - wan_net
+      - saas_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    networks:
+      - saas_net
+    depends_on:
+      ingest-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ──────────────────── PROFILES ────────────────────────────────────────
+
+  # aiops-core:
+  #   profiles: ["ai"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.aiops-core
+  #   networks:
+  #     - saas_net
+
+  # aiops-ml:
+  #   profiles: ["ai"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.aiops-ml
+  #   volumes:
+  #     - model_weights:/models
+  #   networks:
+  #     - saas_net
+
+  # explain:
+  #   profiles: ["ai"]
+  #   build:
+  #     context: .
+  #     dockerfile: docker/Dockerfile.explain
+  #   networks:
+  #     - saas_net
+
+  # ollama:
+  #   profiles: ["edge-ai"]
+  #   image: ollama/ollama:latest
+  #   networks:
+  #     - customer_net
+
+  # toxiproxy:
+  #   profiles: ["chaos"]
+  #   image: ghcr.io/shopify/toxiproxy:latest
+  #   networks:
+  #     - wan_net
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.tests
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONPATH=/app
+      - INGEST_URL=http://ingest-api:8000
+      - COLLECTOR_API_KEY=${COLLECTOR_API_KEY:-test-collector-key-abc123}
+      - TENANT_SECRET=${TENANT_SECRET:-local-tenant-secret-key-32bytes!}
+    networks:
+      - saas_net
+      - customer_net
+      - wan_net
+
+# ──────────────────── NETWORKS ──────────────────────────────────────────
+
+networks:
+  customer_net:
+    internal: true  # NO internet access — proves the trust boundary
+  wan_net:
+    # The only path out of customer_net
+  saas_net:
+    # SaaS services communicate here
+
+# ──────────────────── VOLUMES ───────────────────────────────────────────
+
+volumes:
+  collector_raw:
+    # Raw data store — mounted ONLY into the collector container
+    # SaaS containers CANNOT read this. Verifiable via `docker inspect`.
+  # model_weights:
+  #   # Cached ML model weights for aiops-ml

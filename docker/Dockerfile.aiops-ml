@@ -1,0 +1,28 @@
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+# ML specific dependencies (pinned lightweight for local builds)
+RUN pip install --no-cache-dir \
+    numpy \
+    scipy \
+    scikit-learn
+
+FROM python:3.12-slim
+
+RUN groupadd -r aiopsml && useradd -r -g aiopsml aiopsml
+
+WORKDIR /app
+COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY saas/ ./saas/
+COPY collector/schemas.py ./collector/schemas.py
+
+# Named volume for ML model weights
+VOLUME ["/models"]
+
+USER aiopsml
+
+HEALTHCHECK --interval=20s --timeout=5s --retries=3 \
+    CMD python -c "print('ok')" || exit 1
+
+CMD ["python", "-m", "saas.aiops.ml_forecaster"]

@@ -1,0 +1,8 @@
+# Collector — generated from requirements.in (run `make lock` to regenerate)
+psutil>=5.9,<6
+pydantic>=2.0,<3
+httpx>=0.27,<1
+tenacity>=8.2,<9
+aiosqlite>=0.19,<1
+detect-secrets>=1.4,<2
+uuid6>=2024.1.12

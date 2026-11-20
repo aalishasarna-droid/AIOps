@@ -1,0 +1,47 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Secrets — NEVER commit
+.env
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Model weights / data
+*.h5
+*.pt
+*.onnx
+*.pkl
+
+# Supabase local
+supabase/.temp/
