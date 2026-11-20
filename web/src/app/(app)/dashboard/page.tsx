@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
+import StackScanLoader from "@/components/StackScanLoader";
 import {
   Shield, Activity, Server, Cpu, HardDrive, Wifi, AlertTriangle,
   CheckCircle2, ArrowRight, RotateCcw, Lock, ExternalLink, Terminal, Zap, RefreshCw, Loader2, Building2, Globe
@@ -129,6 +130,7 @@ export default function DashboardPage() {
   const [narration, setNarration] = useState<Narration | null>(null);
   const [scenario, setScenario] = useState<string>("normal");
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [activeScenarioTitle, setActiveScenarioTitle] = useState<string>("");
   const [secondsAgo, setSecondsAgo] = useState<number>(1.2);
   const [currentTime, setCurrentTime] = useState<string>("");
   const [remedStatus, setRemedStatus] = useState<string>("");
@@ -195,6 +197,9 @@ export default function DashboardPage() {
         if (data.fleet_reasons && data.fleet_reasons.length > 0) {
           setFleetReason(data.fleet_reasons[0]);
         }
+        if (data.scenario) {
+          setScenario(data.scenario);
+        }
         if (data.latest_metrics) {
           setMetrics(data.latest_metrics);
           if (data.latest_metrics.cpu_pct !== undefined) {
@@ -239,15 +244,46 @@ export default function DashboardPage() {
 
   const handleSetScenario = async (sc: string) => {
     setScenario(sc);
+
+    if (sc === "normal") {
+      setIsAnalyzing(false);
+      setFleetState("healthy");
+      setFleetReason("All systems nominal");
+      setMetrics((m) => ({ ...m, latency_ms: 0.86, cpu_pct: 1.3, mem_pct: 16.3 }));
+      setCpuHistory([0.9, 1.2, 1.1, 1.4, 1.3, 0.6, 1.3]);
+      setMemHistory([16.1, 16.4, 16.3, 16.5, 16.3]);
+      setNetHistory([0.7, 0.85, 0.76, 0.82, 0.71]);
+      setActiveIncident(null);
+      setNarration(null);
+
+      try {
+        await apiFetch("/api/set-scenario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario: sc, tenant_id: currentTenant.tenant_id }),
+        });
+      } catch (err) {
+        console.error("Scenario API error:", err);
+      }
+      return;
+    }
+
+    // Anomaly scenario triggered: Activate 3D Stack Scan Loader
+    const scenarioLabels: Record<string, string> = {
+      db_outage_cascade: "Database Outage Cascade (Postgres Pool Exhaustion)",
+      memory_leak: "Memory Leak Anomaly (Heap Saturation on worker-02)",
+      login_burst: "Brute Force Burst (Edge Ingress Authentication Surge)",
+    };
+    setActiveScenarioTitle(scenarioLabels[sc] || sc);
     setIsAnalyzing(true);
 
     // Optimistic UI updates for immediate feedback
     if (sc === "db_outage_cascade") {
       setFleetState("critical");
       setFleetReason("Postgres Connection Pool Exhaustion -> Cascading Gateway Timeouts");
-      setMetrics((m) => ({ ...m, latency_ms: 845.0, cpu_pct: 89.5 }));
-      setNetHistory((prev) => [...prev.slice(-15), 120, 350, 680, 845]);
-      setCpuHistory((prev) => [...prev.slice(-15), 45, 62, 78, 89.5]);
+      setMetrics((m) => ({ ...m, latency_ms: 845.0, cpu_pct: 89.5, load_1m: 5.42 }));
+      setNetHistory([180, 290, 420, 610, 750, 810, 845]);
+      setCpuHistory([35, 48, 62, 75, 82, 87, 89.5]);
       setActiveIncident({
         incident_id: "inc-db-001",
         root_cause_candidate: "db-primary",
@@ -262,8 +298,8 @@ export default function DashboardPage() {
     } else if (sc === "memory_leak") {
       setFleetState("degraded");
       setFleetReason("Monotonic Memory Growth on worker-02 (+3.4σ EWMA deviation)");
-      setMetrics((m) => ({ ...m, mem_pct: 94.8, mem_used_mb: 7520 }));
-      setMemHistory((prev) => [...prev.slice(-15), 70, 78, 88, 94.8]);
+      setMetrics((m) => ({ ...m, mem_pct: 94.8, mem_used_mb: 7520, mem_available_mb: 415 }));
+      setMemHistory([65, 72, 79, 85, 89, 92, 94.8]);
       setActiveIncident({
         incident_id: "inc-mem-003",
         root_cause_candidate: "worker-02",
@@ -275,6 +311,7 @@ export default function DashboardPage() {
       setFleetState("degraded");
       setFleetReason("Brute-Force Auth Anomaly Detected on Edge Ingress (142 failures / 10s)");
       setMetrics((m) => ({ ...m, latency_ms: 38.0 }));
+      setNetHistory([2.1, 8.4, 16.5, 24.2, 32.0, 38.0]);
       setActiveIncident({
         incident_id: "inc-sec-002",
         root_cause_candidate: "edge-ingress",
@@ -282,14 +319,9 @@ export default function DashboardPage() {
         affected_services: ["auth-service"],
         signals: [{ metric: "failed_logins_count", service: "edge-ingress", deviation: 5.1 }],
       });
-    } else {
-      setFleetState("healthy");
-      setFleetReason("All 4 nodes operating within normal baselines");
-      setMetrics((m) => ({ ...m, latency_ms: 0.86, cpu_pct: 1.3, mem_pct: 13.8 }));
-      setActiveIncident(null);
-      setNarration(null);
     }
 
+    const startTime = Date.now();
     try {
       const res = await apiFetch("/api/set-scenario", {
         method: "POST",
@@ -298,11 +330,30 @@ export default function DashboardPage() {
       });
       if (res.ok) {
         const data = await res.json();
+
+        // Ensure animation runs smoothly for at least 2.5s so the 5-layer 3D scan completes cleanly
+        const elapsed = Date.now() - startTime;
+        if (elapsed < 2400) {
+          await new Promise((resolve) => setTimeout(resolve, 2400 - elapsed));
+        }
+
         setActiveIncident(data.active_incident);
         setNarration(data.narration);
         setFleetState(data.fleet_state || "healthy");
         if (data.fleet_reasons?.length) setFleetReason(data.fleet_reasons[0]);
-        if (data.latest_metrics) setMetrics(data.latest_metrics);
+        if (data.scenario) setScenario(data.scenario);
+        if (data.latest_metrics) {
+          setMetrics(data.latest_metrics);
+          if (data.latest_metrics.cpu_pct !== undefined) {
+            setCpuHistory((prev) => [...prev.slice(-20), data.latest_metrics.cpu_pct]);
+          }
+          if (data.latest_metrics.mem_pct !== undefined) {
+            setMemHistory((prev) => [...prev.slice(-20), data.latest_metrics.mem_pct]);
+          }
+          if (data.latest_metrics.latency_ms !== undefined) {
+            setNetHistory((prev) => [...prev.slice(-20), data.latest_metrics.latency_ms]);
+          }
+        }
         if (data.recent_payloads) setRecentPayloads(data.recent_payloads);
       }
     } catch (err) {
@@ -429,6 +480,9 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#07090C] text-white p-4 sm:p-6 lg:p-8 font-sans selection:bg-[#C8F63B] selection:text-[#07090C]">
+      {/* 3D Stack Architecture Scan Loader */}
+      <StackScanLoader isOpen={isAnalyzing} scenarioTitle={activeScenarioTitle} />
+
       {/* Dense Calm Header with Multi-Tenant Switcher */}
       <header className="flex flex-col md:flex-row md:items-center justify-between pb-6 mb-6 border-b border-white/10 gap-4">
         <div className="flex items-center gap-3">

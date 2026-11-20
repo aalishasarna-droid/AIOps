@@ -498,8 +498,58 @@ def get_live_telemetry(tenant_id: Optional[str] = None):
     elif tenant_id in ["00000000-0000-0000-0000-000000000003"]:
         active_tenant_name = "Apex Logistics Global"
 
+    # Maintain persistent anomaly metrics if a failure scenario is active
+    active_sc = LIVE_TELEMETRY.get("scenario", "normal")
+    metrics_to_return = dict(LIVE_TELEMETRY.get("latest_metrics", {}))
+
+    if active_sc == "db_outage_cascade":
+        import random
+        # Maintain persistent cascade anomaly (high CPU & massive latency spike)
+        cpu_val = round(88.0 + random.uniform(-2.5, 4.0), 1)
+        load_val = round(5.4 + random.uniform(-0.3, 0.5), 2)
+        latency_val = round(845.0 + random.uniform(-40.0, 55.0), 1)
+        metrics_to_return["cpu_pct"] = cpu_val
+        metrics_to_return["load_1m"] = load_val
+        metrics_to_return["latency_ms"] = latency_val
+        metrics_to_return["pool_usage_pct"] = round(98.5 + random.uniform(-0.8, 1.2), 1)
+        metrics_to_return["http_500_rate"] = round(15.2 + random.uniform(-1.0, 1.8), 1)
+        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = cpu_val
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = latency_val
+        LIVE_TELEMETRY["latest_metrics"]["load_1m"] = load_val
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Postgres Connection Pool Exhaustion -> Cascading Gateway Timeouts"]
+
+    elif active_sc == "memory_leak":
+        import random
+        current_mem = LIVE_TELEMETRY["latest_metrics"].get("mem_pct", 94.0)
+        if current_mem < 90.0:
+            current_mem = 92.5
+        new_mem = min(98.8, round(current_mem + random.uniform(0.1, 0.3), 2))
+        LIVE_TELEMETRY["latest_metrics"]["mem_pct"] = new_mem
+        metrics_to_return["mem_pct"] = new_mem
+        mem_tot = metrics_to_return.get("mem_total_mb", 7935)
+        metrics_to_return["mem_used_mb"] = round((new_mem / 100.0) * mem_tot)
+        metrics_to_return["mem_available_mb"] = max(120, round(mem_tot - metrics_to_return["mem_used_mb"]))
+        LIVE_TELEMETRY["latest_metrics"]["mem_used_mb"] = metrics_to_return["mem_used_mb"]
+        LIVE_TELEMETRY["latest_metrics"]["mem_available_mb"] = metrics_to_return["mem_available_mb"]
+        LIVE_TELEMETRY["fleet_state"] = "degraded"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Monotonic Memory Growth on worker-02 (+3.4σ EWMA deviation)"]
+
+    elif active_sc == "login_burst":
+        import random
+        lat_val = round(38.0 + random.uniform(-3.0, 6.0), 1)
+        fail_val = random.randint(140, 168)
+        metrics_to_return["latency_ms"] = lat_val
+        metrics_to_return["failed_logins_count"] = fail_val
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = lat_val
+        LIVE_TELEMETRY["latest_metrics"]["failed_logins_count"] = fail_val
+        LIVE_TELEMETRY["fleet_state"] = "degraded"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Brute-Force Auth Anomaly Detected on Edge Ingress (142 failures / 10s)"]
+
     return {
         **LIVE_TELEMETRY,
+        "latest_metrics": metrics_to_return,
+        "scenario": active_sc,
         "tenant_id": tenant_id or "00000000-0000-0000-0000-000000000001",
         "tenant_name": active_tenant_name,
         "recent_payloads": filtered_payloads,
@@ -554,6 +604,7 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
     Inject scenario and trigger causal graph traversal and AI explainability.
     """
     scenario = body.get("scenario", "normal")
+    tenant_id = body.get("tenant_id", "00000000-0000-0000-0000-000000000001")
     LIVE_TELEMETRY["scenario"] = scenario
 
     if scenario == "db_outage_cascade":
@@ -561,6 +612,9 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
         LIVE_TELEMETRY["fleet_reasons"] = ["Postgres Connection Pool Exhaustion -> Cascading Gateway Timeouts"]
         LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 845.0
         LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 89.5
+        LIVE_TELEMETRY["latest_metrics"]["load_1m"] = 5.42
+        LIVE_TELEMETRY["latest_metrics"]["pool_usage_pct"] = 98.5
+        LIVE_TELEMETRY["latest_metrics"]["http_500_rate"] = 15.2
 
         incident_dict = {
             "incident_id": "inc-db-001",
@@ -581,6 +635,7 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
         LIVE_TELEMETRY["fleet_state"] = "degraded"
         LIVE_TELEMETRY["fleet_reasons"] = ["Brute-Force Auth Anomaly Detected on Edge Ingress (142 failures / 10s)"]
         LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 38.0
+        LIVE_TELEMETRY["latest_metrics"]["failed_logins_count"] = 142
 
         incident_dict = {
             "incident_id": "inc-sec-002",
@@ -599,6 +654,9 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
         LIVE_TELEMETRY["fleet_state"] = "degraded"
         LIVE_TELEMETRY["fleet_reasons"] = ["Monotonic Memory Growth on worker-02 (+3.4σ EWMA deviation)"]
         LIVE_TELEMETRY["latest_metrics"]["mem_pct"] = 94.8
+        mem_tot = LIVE_TELEMETRY["latest_metrics"].get("mem_total_mb", 7935.0)
+        LIVE_TELEMETRY["latest_metrics"]["mem_used_mb"] = round(0.948 * mem_tot, 1)
+        LIVE_TELEMETRY["latest_metrics"]["mem_available_mb"] = round(0.052 * mem_tot, 1)
 
         incident_dict = {
             "incident_id": "inc-mem-003",
@@ -615,13 +673,16 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
 
     else:
         LIVE_TELEMETRY["fleet_state"] = "healthy"
-        LIVE_TELEMETRY["fleet_reasons"] = ["All 4 nodes operating within normal baselines"]
-        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 5.2
-        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 18.2
+        LIVE_TELEMETRY["fleet_reasons"] = ["All systems nominal"]
         LIVE_TELEMETRY["active_incident"] = None
         LIVE_TELEMETRY["narration"] = None
+        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 1.2
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 0.85
+        LIVE_TELEMETRY["latest_metrics"]["load_1m"] = 0.15
+        for k in ("pool_usage_pct", "http_500_rate", "failed_logins_count"):
+            LIVE_TELEMETRY["latest_metrics"].pop(k, None)
 
-    return LIVE_TELEMETRY
+    return get_live_telemetry(tenant_id)
 
 
 @app.post("/ingest")
@@ -684,15 +745,23 @@ async def ingest_payloads(
                     metrics_dict[name] = float(val)
 
         if metrics_dict:
+            current_sc = LIVE_TELEMETRY.get("scenario", "normal")
             for k, val in metrics_dict.items():
+                # If an anomaly scenario is active, do not overwrite the anomaly signals with normal baseline readings
+                if current_sc == "db_outage_cascade" and k in ("latency_ms", "cpu_pct", "load_1m", "pool_usage_pct", "http_500_rate"):
+                    continue
+                if current_sc == "memory_leak" and k in ("mem_pct", "mem_used_mb", "mem_available_mb"):
+                    continue
+                if current_sc == "login_burst" and k in ("latency_ms", "failed_logins_count"):
+                    continue
                 LIVE_TELEMETRY["latest_metrics"][k] = round(float(val), 2)
 
             # Evaluate fleet health
-            state, reasons = fleet_evaluator.evaluate_node_health(
-                last_seen_ts=LIVE_TELEMETRY["last_seen_ts"],
-                metrics=LIVE_TELEMETRY["latest_metrics"],
-            )
-            if LIVE_TELEMETRY["scenario"] == "normal":
+            if current_sc == "normal":
+                state, reasons = fleet_evaluator.evaluate_node_health(
+                    last_seen_ts=LIVE_TELEMETRY["last_seen_ts"],
+                    metrics=LIVE_TELEMETRY["latest_metrics"],
+                )
                 LIVE_TELEMETRY["fleet_state"] = state.value
                 LIVE_TELEMETRY["fleet_reasons"] = reasons or ["All signals within normal baselines"]
 
