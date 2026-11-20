@@ -26,7 +26,7 @@ logs: ## Tail logs from all services
 
 # ──────────────────── Profiles ──────────────────────────────────────────
 
-.PHONY: up-ai up-chaos up-edge-ai
+.PHONY: up-ai up-chaos up-edge-ai up-regions
 
 up-ai: ## Start AI services (aiops-core, aiops-ml, explain)
 	docker compose --profile ai up -d
@@ -36,6 +36,9 @@ up-chaos: ## Start chaos testing (toxiproxy)
 
 up-edge-ai: ## Start edge AI (ollama)
 	docker compose --profile edge-ai up -d
+
+up-regions: ## Start multi-region simulated ingest nodes (eu-central-1 on port 8001)
+	docker compose --profile regions up -d
 
 # ──────────────────── Dependencies ──────────────────────────────────────
 

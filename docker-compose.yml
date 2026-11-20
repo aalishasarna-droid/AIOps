@@ -52,6 +52,7 @@ services:
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - INGEST_REGION=${INGEST_REGION:-ap-south-1}
     command: ["uvicorn", "saas.ingest_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
@@ -83,6 +84,33 @@ services:
     restart: unless-stopped
 
   # ──────────────────── PROFILES ────────────────────────────────────────
+
+  ingest-api-eu:
+    profiles: ["regions"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ingest
+    env_file: .env
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - INGEST_REGION=eu-central-1
+    command: ["uvicorn", "saas.ingest_api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./saas:/app/saas
+      - ./web:/app/web
+    networks:
+      - wan_net
+      - saas_net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
 
   # aiops-core:
   #   profiles: ["ai"]
