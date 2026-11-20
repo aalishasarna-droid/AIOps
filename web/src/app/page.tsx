@@ -1,8 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export default function LandingPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    const handleMsg = (e: MessageEvent) => {
+      if (e.data && e.data.type === "NAVIGATE" && typeof e.data.url === "string") {
+        router.push(e.data.url);
+      }
+    };
+    window.addEventListener("message", handleMsg);
+    return () => window.removeEventListener("message", handleMsg);
+  }, [router]);
+
   return (
     <main className="fixed inset-0 w-screen h-screen m-0 p-0 overflow-hidden bg-[#04060f] z-50">
       <iframe

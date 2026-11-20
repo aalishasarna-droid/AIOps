@@ -212,7 +212,7 @@ export default function AppSidebar({
                     href={item.href}
                     onClick={onCloseMobile}
                     title={collapsed ? `${item.label} (${item.badge})` : undefined}
-                    className={`group relative flex items-center rounded-xl text-xs transition-all ${
+                    className={`group relative flex items-center rounded-xl text-xs transition-all cursor-pointer pointer-events-auto select-none ${
                       collapsed
                         ? "justify-center p-2.5"
                         : "justify-between px-3 py-2"
@@ -307,7 +307,7 @@ export default function AppSidebar({
                 <Link
                   href="/login?tab=signin"
                   onClick={onCloseMobile}
-                  className="text-[#9AA4B2] hover:text-white flex items-center gap-1 transition-colors"
+                  className="text-[#9AA4B2] hover:text-white flex items-center gap-1 transition-colors cursor-pointer pointer-events-auto"
                   title="Sign In to another organization"
                 >
                   <LogIn className="w-2.5 h-2.5 text-[#3B82F6]" />
@@ -316,7 +316,7 @@ export default function AppSidebar({
                 <Link
                   href="/login?tab=create"
                   onClick={onCloseMobile}
-                  className="text-[#C8F63B] hover:underline flex items-center gap-1 transition-colors font-semibold"
+                  className="text-[#C8F63B] hover:underline flex items-center gap-1 transition-colors font-semibold cursor-pointer pointer-events-auto"
                   title="Enroll a new enterprise tenant"
                 >
                   <UserPlus className="w-2.5 h-2.5" />
@@ -353,14 +353,14 @@ export default function AppSidebar({
           <div className="flex flex-col items-center gap-2.5 py-1">
             <Link
               href="/login?tab=signin"
-              className="p-2 rounded-lg text-[#9AA4B2] hover:text-white hover:bg-white/5 transition-colors"
+              className="p-2 rounded-lg text-[#9AA4B2] hover:text-white hover:bg-white/5 transition-colors cursor-pointer pointer-events-auto"
               title="Sign In to Tenant"
             >
               <LogIn className="w-4 h-4 text-[#3B82F6]" />
             </Link>
             <Link
               href="/login?tab=create"
-              className="p-2 rounded-lg text-[#C8F63B] hover:bg-white/5 transition-colors"
+              className="p-2 rounded-lg text-[#C8F63B] hover:bg-white/5 transition-colors cursor-pointer pointer-events-auto"
               title="Create Account / Enroll Tenant"
             >
               <UserPlus className="w-4 h-4" />

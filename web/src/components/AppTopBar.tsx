@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Menu,
   Globe,
@@ -26,6 +26,7 @@ interface AppTopBarProps {
 
 export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const {
     currentTenant,
     availableTenants,
@@ -159,10 +160,14 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
           </div>
 
           {/* Auth: Sign In & Create Account */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 relative z-50">
             <Link
               href="/login?tab=signin"
-              className="text-xs font-semibold bg-white/5 hover:bg-white/10 text-[#9AA4B2] hover:text-white border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap"
+              onClick={(e) => {
+                e.preventDefault();
+                router.push("/login?tab=signin");
+              }}
+              className="text-xs font-semibold bg-white/5 hover:bg-white/10 text-[#9AA4B2] hover:text-white border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer relative z-50 pointer-events-auto"
               title="Sign In to Tenant Organization"
             >
               <LogIn className="w-3.5 h-3.5 text-[#3B82F6]" />
@@ -170,7 +175,11 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
             </Link>
             <Link
               href="/login?tab=create"
-              className="text-xs font-bold bg-[#C8F63B]/10 hover:bg-[#C8F63B]/20 text-[#C8F63B] border border-[#C8F63B]/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all whitespace-nowrap shadow-[0_0_12px_rgba(200,246,59,0.12)] hover:shadow-[0_0_16px_rgba(200,246,59,0.25)]"
+              onClick={(e) => {
+                e.preventDefault();
+                router.push("/login?tab=create");
+              }}
+              className="text-xs font-bold bg-[#C8F63B]/10 hover:bg-[#C8F63B]/20 text-[#C8F63B] border border-[#C8F63B]/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all whitespace-nowrap shadow-[0_0_12px_rgba(200,246,59,0.12)] hover:shadow-[0_0_16px_rgba(200,246,59,0.25)] cursor-pointer relative z-50 pointer-events-auto"
               title="Create New Tenant Account"
             >
               <UserPlus className="w-3.5 h-3.5 text-[#C8F63B]" />

@@ -324,7 +324,7 @@ export default function LoginPage() {
                 setActiveTab("signin");
                 setRegSuccessData(null);
               }}
-              className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer pointer-events-auto select-none ${
                 activeTab === "signin"
                   ? "bg-[#C8F63B] text-[#07090C] shadow-[0_0_15px_rgba(200,246,59,0.25)]"
                   : "text-[#9AA4B2] hover:text-white"
@@ -339,7 +339,7 @@ export default function LoginPage() {
                 setActiveTab("create");
                 setErrorMsg("");
               }}
-              className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
+              className={`flex-1 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer pointer-events-auto select-none ${
                 activeTab === "create"
                   ? "bg-[#C8F63B] text-[#07090C] shadow-[0_0_15px_rgba(200,246,59,0.25)]"
                   : "text-[#9AA4B2] hover:text-white"

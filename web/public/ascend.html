@@ -21,6 +21,39 @@
   }
   </script>
 
+  <script>
+    function navigateTo(url, event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      try {
+        if (window.top && window.top !== window) {
+          window.top.location.href = url;
+          return false;
+        }
+      } catch (err) {}
+      try {
+        window.parent.postMessage({ type: 'NAVIGATE', url: url }, '*');
+      } catch (err) {}
+      window.location.href = url;
+      return false;
+    }
+
+    // Capture all internal links to guarantee navigation from iframe
+    document.addEventListener('DOMContentLoaded', () => {
+      document.body.addEventListener('click', (e) => {
+        const link = e.target.closest('a');
+        if (!link) return;
+        const href = link.getAttribute('href');
+        if (!href || href.startsWith('#')) return;
+        if (href.startsWith('/') || link.getAttribute('target') === '_top') {
+          navigateTo(href, e);
+        }
+      }, true);
+    });
+  </script>
+
   <style>
     :root {
       --bg:#03050c; --bg-2:#050814; --ink:#ffffff; --muted:#e2e8f0; --muted-2:#cbd5e1;
@@ -71,6 +104,9 @@
       z-index:1;
     }
     .nav {
+      position:relative;
+      z-index:200;
+      pointer-events:auto;
       max-width:var(--maxw);
       margin:0 auto;
       width:100%;
@@ -516,7 +552,20 @@
       .showcase-copy .btn { margin:24px auto 0; }
       .stats { grid-template-columns:repeat(2,1fr); }
     }
-    .nav-actions { display:flex; align-items:center; gap:10px; }
+    .nav-actions {
+      display:flex;
+      align-items:center;
+      gap:10px;
+      position:relative;
+      z-index:201;
+      pointer-events:auto;
+    }
+    .nav-actions .btn {
+      position:relative;
+      z-index:202;
+      pointer-events:auto !important;
+      cursor:pointer !important;
+    }
     @media (max-width:720px) {
       .nav-links { display:none; }
       .nav { padding:18px 20px; }
@@ -561,8 +610,8 @@
           <a href="/dashboard/privacy" target="_top">Privacy Gate</a>
         </div>
         <div class="nav-actions">
-          <a href="/login?tab=signin" class="btn btn-ghost" target="_top" style="padding:9px 18px;font-size:13.5px;">Sign In</a>
-          <a href="/login?tab=create" class="btn btn-primary" target="_top" style="padding:9px 20px;font-size:13.5px;">Create Account</a>
+          <a href="/login?tab=signin" class="btn btn-ghost" target="_top" onclick="return navigateTo('/login?tab=signin', event)" style="padding:9px 18px;font-size:13.5px;cursor:pointer;">Sign In</a>
+          <a href="/login?tab=create" class="btn btn-primary" target="_top" onclick="return navigateTo('/login?tab=create', event)" style="padding:9px 20px;font-size:13.5px;cursor:pointer;">Create Account</a>
         </div>
       </nav>
 
@@ -573,17 +622,17 @@
         <p class="hero-sub" data-reveal style="--rd:180ms;">
           Private at edge, unified visibility. Autonomous observability with zero raw cloud egress, local regex scrubbing, and instant Gemini root-cause runbook remediation.
         </p>
-        <div class="hero-actions" data-reveal style="--rd:300ms;">
-          <a href="/dashboard" class="btn btn-primary" target="_top">
+        <div class="hero-actions" data-reveal style="--rd:300ms;position:relative;z-index:30;">
+          <a href="/dashboard" class="btn btn-primary" target="_top" onclick="return navigateTo('/dashboard', event)" style="cursor:pointer;">
             <span>Launch Fleet Console</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </a>
-          <a href="/login?tab=create" class="btn btn-outline" target="_top" style="border-color:rgba(93,240,168,0.5);color:#7affc2;">
+          <a href="/login?tab=create" class="btn btn-outline" target="_top" onclick="return navigateTo('/login?tab=create', event)" style="border-color:rgba(93,240,168,0.5);color:#7affc2;cursor:pointer;">
             <span>Create Free Account</span>
           </a>
         </div>
-        <div style="margin-top:16px;font-size:13px;color:rgba(255,255,255,0.75);font-family:'JetBrains Mono',monospace;" data-reveal style="--rd:360ms;">
-          Already registered? <a href="/login?tab=signin" target="_top" style="color:#5df0a8;font-weight:600;text-decoration:underline;margin-left:4px;">Sign in to your organization &rarr;</a>
+        <div style="margin-top:16px;font-size:13px;color:rgba(255,255,255,0.75);font-family:'JetBrains Mono',monospace;position:relative;z-index:30;" data-reveal style="--rd:360ms;">
+          Already registered? <a href="/login?tab=signin" target="_top" onclick="return navigateTo('/login?tab=signin', event)" style="color:#5df0a8;font-weight:600;text-decoration:underline;margin-left:4px;cursor:pointer;">Sign in to your organization &rarr;</a>
         </div>
       </div>
 
@@ -768,12 +817,12 @@
         <span class="eyebrow" data-reveal style="--rd:60ms;">Autonomous & Privacy-Preserving</span>
         <h2 data-reveal style="--rd:140ms;">Private at edge, unified visibility.</h2>
         <p data-reveal style="--rd:220ms;">Deploy local collector containers in minutes. Guarantee customer data residency and autonomous remediation without leaking a single byte.</p>
-        <div class="hero-actions" data-reveal style="--rd:300ms;">
-          <a href="/login?tab=create" class="btn btn-primary" target="_top">
+        <div class="hero-actions" data-reveal style="--rd:300ms;position:relative;z-index:30;">
+          <a href="/login?tab=create" class="btn btn-primary" target="_top" onclick="return navigateTo('/login?tab=create', event)" style="cursor:pointer;">
             <span>Create Free Account</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </a>
-          <a href="/login?tab=signin" class="btn btn-outline" target="_top">
+          <a href="/login?tab=signin" class="btn btn-outline" target="_top" onclick="return navigateTo('/login?tab=signin', event)" style="cursor:pointer;">
             <span>Sign In to Tenant</span>
           </a>
         </div>
@@ -1389,10 +1438,12 @@ gl_FragColor.rgb += glint * waterMask * dayAmt * oceanGlint * vec3(1.0, 0.97, 0.
           if (baseMat.map) {
             if (baseMat.map.image && baseMat.map.image.complete) {
               initLandMarkers(planetMesh, baseMat.map);
-            } else {
+            } else if (baseMat.map.image && typeof baseMat.map.image.addEventListener === 'function') {
               baseMat.map.image.addEventListener('load', () => {
                 initLandMarkers(planetMesh, baseMat.map);
               });
+            } else {
+              initLandMarkers(planetMesh, baseMat.map);
             }
           }
 
