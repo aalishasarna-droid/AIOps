@@ -9,6 +9,8 @@ export interface TenantProfile {
   name?: string;
   region: string;
   collector_id: string;
+  token?: string;
+  is_authenticated?: boolean;
 }
 
 export const DEFAULT_TENANTS: TenantProfile[] = [
@@ -42,6 +44,9 @@ interface TenantContextType {
   secondsAgo: number;
   setSecondsAgo: React.Dispatch<React.SetStateAction<number>>;
   currentTime: string;
+  isAuthenticated: boolean;
+  setIsAuthenticated: React.Dispatch<React.SetStateAction<boolean>>;
+  logout: () => void;
 }
 
 const TenantContext = createContext<TenantContextType | undefined>(undefined);
@@ -52,15 +57,25 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
   const [fleetState, setFleetState] = useState<string>("healthy");
   const [secondsAgo, setSecondsAgo] = useState<number>(3);
   const [currentTime, setCurrentTime] = useState<string>("");
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
+      const authFlag = localStorage.getItem("aiops_is_authenticated");
       const stored = localStorage.getItem("aiops_current_tenant");
+      let activeAuth = authFlag === "true";
       if (stored) {
         try {
           const parsed = JSON.parse(stored);
           if (parsed.tenant_id) {
             setCurrentTenant(parsed);
+          }
+          if (
+            parsed.is_authenticated ||
+            parsed.token ||
+            (parsed.tenant_name && !parsed.tenant_name.includes("Acme Financial"))
+          ) {
+            activeAuth = true;
           }
         } catch {
           // ignore
@@ -70,8 +85,12 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
       const qTenantId = urlParams.get("tenant_id");
       if (qTenantId) {
         const found = DEFAULT_TENANTS.find((t) => t.tenant_id === qTenantId);
-        if (found) setCurrentTenant(found);
+        if (found) {
+          setCurrentTenant(found);
+          activeAuth = true;
+        }
       }
+      setIsAuthenticated(activeAuth);
     }
 
     // Load registered tenants live from Supabase via Ingest API
@@ -110,6 +129,23 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const logout = () => {
+    setIsAuthenticated(false);
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("aiops_is_authenticated");
+      localStorage.removeItem("aiops_auth_token");
+      const stored = localStorage.getItem("aiops_current_tenant");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored);
+          delete parsed.token;
+          delete parsed.is_authenticated;
+          localStorage.setItem("aiops_current_tenant", JSON.stringify(parsed));
+        } catch {}
+      }
+    }
+  };
+
   return (
     <TenantContext.Provider
       value={{
@@ -122,6 +158,9 @@ export function TenantProvider({ children }: { children: React.ReactNode }) {
         secondsAgo,
         setSecondsAgo,
         currentTime,
+        isAuthenticated,
+        setIsAuthenticated,
+        logout,
       }}
     >
       {children}

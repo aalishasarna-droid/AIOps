@@ -31,12 +31,12 @@ interface TelemetryMetrics {
 
 interface Incident {
   incident_id: string;
-  severity: string;
-  state: string;
-  anomaly_score: number;
+  severity?: string;
+  state?: string;
+  anomaly_score?: number;
   confidence: number;
   root_cause_candidate: string;
-  affected_services: string[];
+  affected_services?: string[];
 }
 
 export default function DashboardPage() {
@@ -121,10 +121,14 @@ export default function DashboardPage() {
           }
         }
         if (data.active_incident !== undefined) {
-          setActiveIncident(data.active_incident);
+          if (data.active_incident !== null || data.scenario === "normal") {
+            setActiveIncident(data.active_incident);
+          }
         }
         if (data.narration !== undefined) {
-          setNarration(data.narration);
+          if (data.narration !== null || data.scenario === "normal") {
+            setNarration(data.narration);
+          }
         }
         if (data.seconds_since_last_payload !== undefined) {
           setSecondsAgo(data.seconds_since_last_payload);
@@ -135,14 +139,18 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSetScenario = async (sc: string) => {
+  const handleSetScenario = async (rawSc: string) => {
+    let sc = rawSc;
+    if (sc === "leak") sc = "memory_leak";
+    if (sc === "partition") sc = "db_outage_cascade";
+
     setScenario(sc);
 
     if (sc === "normal") {
       setIsAnalyzing(false);
       setFleetState("healthy");
       setFleetReason("All systems nominal");
-      setMetrics((m) => ({ ...m, latency_ms: 0.86, cpu_pct: 1.3, mem_pct: 16.3 }));
+      setMetrics((m) => ({ ...m, latency_ms: 0.86, cpu_pct: 1.3, mem_pct: 16.3, load_1m: 0.13, packet_loss_pct: 0.0 }));
       setCpuHistory([0.9, 1.2, 1.1, 1.4, 1.3, 0.6, 1.3]);
       setMemHistory([16.1, 16.4, 16.3, 16.5, 16.3]);
       setNetHistory([0.7, 0.85, 0.76, 0.82, 0.71]);
@@ -150,17 +158,19 @@ export default function DashboardPage() {
       setNarration(null);
 
       try {
-        await apiFetch("/api/telemetry/scenario", {
+        await apiFetch("/api/set-scenario", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ scenario: "normal" }),
+          body: JSON.stringify({ scenario: "normal", tenant_id: currentTenant.tenant_id }),
         });
       } catch {}
       return;
     }
 
     const scenarioTitles: Record<string, string> = {
+      memory_leak: "Memory Leak Cascade (Worker-03 Pod OOM)",
       leak: "Memory Leak Cascade (Worker-03 Pod OOM)",
+      db_outage_cascade: "Cascading Network Partition (Ingress to Payment API)",
       partition: "Cascading Network Partition (Ingress to Payment API)",
       cpu_spike: "CPU Saturation & Thread Pool Exhaustion (Auth Node)",
       net_latency: "Network Latency & Packet Loss Anomaly (Ingress Gateway)",
@@ -169,13 +179,13 @@ export default function DashboardPage() {
     setIsAnalyzing(true);
     setRemediationApproved(false);
 
-    if (sc === "leak") {
+    if (sc === "memory_leak" || sc === "leak") {
       setFleetState("critical");
-      setFleetReason("High Memory Growth Rate in worker-03 (EWMA +3.2σ)");
-      setMetrics((m) => ({ ...m, mem_pct: 89.4, mem_used_mb: 7094 }));
-      setMemHistory([16.5, 28.2, 45.1, 62.8, 78.4, 89.4]);
+      setFleetReason("High Memory Growth Rate in worker-03 (+3.4σ EWMA, Pod OOM hazard)");
+      setMetrics((m) => ({ ...m, mem_pct: 94.8, mem_used_mb: 7522, mem_available_mb: 413 }));
+      setMemHistory([16.5, 28.2, 45.1, 62.8, 78.4, 94.8]);
       setActiveIncident({
-        incident_id: "inc-" + Math.random().toString(36).substring(2, 9),
+        incident_id: "inc-mem-003",
         severity: "critical",
         state: "open",
         anomaly_score: 0.94,
@@ -183,13 +193,45 @@ export default function DashboardPage() {
         root_cause_candidate: "worker-03",
         affected_services: ["worker-03", "job-queue", "api-gateway"],
       });
+      setNarration({
+        narration: "Critical memory growth detected on worker-03 exceeding threshold (+3.4σ EWMA). Unbounded buffer accumulation in event streaming thread pool.",
+        root_cause: { entity: "worker-03", confidence: 0.94 },
+        steps: [
+          "Isolate and terminate worker-03 pod to prevent node-level kernel OOM panic: kubectl delete pod worker-03 --now",
+          "Trigger automated container restart with pinned JVM/Node max-old-space-size limits",
+          "Capture heap snapshot dump from storage volume for memory leak path analysis",
+        ],
+      });
+    } else if (sc === "cpu_spike") {
+      setFleetState("critical");
+      setFleetReason("CPU Saturation & Thread Pool Starvation on Auth Node (+4.8σ EWMA)");
+      setMetrics((m) => ({ ...m, cpu_pct: 96.4, load_1m: 12.8, latency_ms: 145.2 }));
+      setCpuHistory([12.0, 35.4, 62.1, 84.5, 92.0, 96.4]);
+      setActiveIncident({
+        incident_id: "inc-cpu-005",
+        severity: "critical",
+        state: "open",
+        anomaly_score: 0.95,
+        confidence: 0.96,
+        root_cause_candidate: "auth-node-01",
+        affected_services: ["auth-service", "api-gateway", "session-store"],
+      });
+      setNarration({
+        narration: "Severe CPU saturation and thread pool starvation detected on auth-node-01 (+4.8σ EWMA). Cryptographic hash verification backlog saturating all available cores.",
+        root_cause: { entity: "auth-node-01", confidence: 0.96 },
+        steps: [
+          "Scale out auth worker replica count: kubectl scale deployment auth-service --replicas=8",
+          "Profile hot thread execution loops with `perf top -p $(pgrep auth-worker)`",
+          "Temporarily throttle non-essential background token refresh cron jobs",
+        ],
+      });
     } else if (sc === "net_latency") {
       setFleetState("critical");
       setFleetReason("Network Gateway Congestion & High Packet Loss (485ms latency, 18.5% drop)");
       setMetrics((m) => ({ ...m, latency_ms: 485.2, packet_loss_pct: 18.5 }));
       setNetHistory([0.8, 2.4, 45.0, 180.2, 340.5, 485.2]);
       setActiveIncident({
-        incident_id: "inc-" + Math.random().toString(36).substring(2, 9),
+        incident_id: "inc-net-004",
         severity: "critical",
         state: "open",
         anomaly_score: 0.96,
@@ -197,12 +239,22 @@ export default function DashboardPage() {
         root_cause_candidate: "ingress-gateway",
         affected_services: ["ingress-gateway", "orders-api", "payment-service"],
       });
+      setNarration({
+        narration: "Massive ingress packet loss (18.5%) and gateway latency spike (485ms) causing upstream timeouts on ingress-gateway.",
+        root_cause: { entity: "ingress-gateway", confidence: 0.98 },
+        steps: [
+          "Increase proxy upstream timeout in ingress configuration: proxy_read_timeout 60s; proxy_connect_timeout 10s;",
+          "Check for saturated NIC queues or packet drops with `ip -s link show` and adjust ring buffer size `ethtool -G eth0 rx 4096`",
+          "Apply circuit-breaker policy to route non-critical traffic to healthy degraded backup cluster",
+        ],
+      });
     } else {
       setFleetState("critical");
-      setFleetReason("Cascading Timeouts Detected (Payment Gateway)");
-      setMetrics((m) => ({ ...m, latency_ms: 320.5, packet_loss_pct: 4.8 }));
+      setFleetReason("Cascading Timeouts Detected (Payment Gateway & Postgres Connection Pool)");
+      setMetrics((m) => ({ ...m, latency_ms: 845.0, packet_loss_pct: 8.5, cpu_pct: 89.5 }));
+      setNetHistory([1.2, 5.4, 120.0, 450.0, 720.0, 845.0]);
       setActiveIncident({
-        incident_id: "inc-" + Math.random().toString(36).substring(2, 9),
+        incident_id: "inc-db-001",
         severity: "critical",
         state: "open",
         anomaly_score: 0.88,
@@ -210,15 +262,33 @@ export default function DashboardPage() {
         root_cause_candidate: "db-primary",
         affected_services: ["db-primary", "payment-api", "frontend-edge"],
       });
+      setNarration({
+        narration: "PostgreSQL primary connection pool saturation (98.5% capacity) cascading into database timeouts across downstream payment APIs.",
+        root_cause: { entity: "db-primary", confidence: 0.88 },
+        steps: [
+          "Terminate idle-in-transaction connections with `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle in transaction';`",
+          "Increase PgBouncer max client connections pool limit by +50 slots",
+          "Enable read-replica fallback routing for all read-only customer dashboard queries",
+        ],
+      });
     }
 
     try {
-      const res = await apiFetch("/api/telemetry/scenario", {
+      let res = await apiFetch("/api/set-scenario", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ scenario: sc }),
-      });
-      if (res.ok) {
+        body: JSON.stringify({ scenario: sc, tenant_id: currentTenant.tenant_id }),
+      }).catch(() => null);
+
+      if (!res || !res.ok) {
+        res = await apiFetch("/api/telemetry/scenario", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scenario: sc, tenant_id: currentTenant.tenant_id }),
+        }).catch(() => null);
+      }
+
+      if (res && res.ok) {
         const data = await res.json();
         if (data.active_incident) setActiveIncident(data.active_incident);
         if (data.narration) setNarration(data.narration);
@@ -248,10 +318,24 @@ export default function DashboardPage() {
 
   const handleApproveRemediation = async () => {
     setRemediationApproved(true);
+    try {
+      await apiFetch("/api/remediation/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tenant_id: currentTenant.tenant_id || "00000000-0000-0000-0000-000000000001",
+          incident_id: activeIncident?.incident_id || "inc-db-001",
+          action: "approve_autonomous_runbook",
+          actor: "security_admin",
+        }),
+      });
+    } catch (e) {
+      console.error("Failed to approve remediation:", e);
+    }
     setTimeout(() => {
       handleSetScenario("normal");
       setRemediationApproved(false);
-    }, 2000);
+    }, 1500);
   };
 
   useEffect(() => {
@@ -295,7 +379,7 @@ export default function DashboardPage() {
     (activeIncident
       ? [
           `1. Telemetry spike detected on foundational dependency '${activeIncident.root_cause_candidate}'`,
-          `2. Cascading timeouts propagating to: ${activeIncident.affected_services.join(", ")}`,
+          `2. Cascading timeouts propagating to: ${(activeIncident.affected_services || []).join(", ") || "dependent nodes"}`,
           `3. End-user latency and error rates elevated beyond SLA thresholds`,
         ]
       : null);
@@ -335,50 +419,55 @@ export default function DashboardPage() {
             Simulate Incident:
           </span>
           <button
+            id="btn-scenario-normal"
             onClick={() => handleSetScenario("normal")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
               scenario === "normal"
-                ? "bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/40 font-bold"
+                ? "bg-[#22C55E]/20 text-[#22C55E] border border-[#22C55E]/60 font-bold shadow-[0_0_12px_rgba(34,197,94,0.3)]"
                 : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
             }`}
           >
             🟢 All Nominal
           </button>
           <button
-            onClick={() => handleSetScenario("leak")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              scenario === "leak"
-                ? "bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/40 font-bold"
+            id="btn-scenario-leak"
+            onClick={() => handleSetScenario("memory_leak")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
+              scenario === "leak" || scenario === "memory_leak"
+                ? "bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/60 font-bold shadow-[0_0_12px_rgba(239,68,68,0.35)]"
                 : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
             }`}
           >
             🔴 Memory Leak
           </button>
           <button
-            onClick={() => handleSetScenario("partition")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              scenario === "partition"
-                ? "bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/40 font-bold"
+            id="btn-scenario-partition"
+            onClick={() => handleSetScenario("db_outage_cascade")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
+              scenario === "partition" || scenario === "db_outage_cascade"
+                ? "bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/60 font-bold shadow-[0_0_12px_rgba(239,68,68,0.35)]"
                 : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
             }`}
           >
             🔴 Cascading Partition
           </button>
           <button
+            id="btn-scenario-cpu"
             onClick={() => handleSetScenario("cpu_spike")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              scenario === "cpu_spike"
-                ? "bg-[#EF4444]/20 text-[#EF4444] border border-[#EF4444]/40 font-bold"
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
+              scenario === "cpu_spike" || scenario === "cpu" || scenario === "cpu_saturation"
+                ? "bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/60 font-bold shadow-[0_0_12px_rgba(239,68,68,0.35)]"
                 : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
             }`}
           >
             🔴 CPU Saturation
           </button>
           <button
+            id="btn-scenario-network"
             onClick={() => handleSetScenario("net_latency")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              scenario === "net_latency"
-                ? "bg-blue-500/20 text-blue-400 border border-blue-500/40 font-bold"
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
+              scenario === "net_latency" || scenario === "network_error" || scenario === "network_latency"
+                ? "bg-blue-500/25 text-blue-400 border border-blue-500/60 font-bold shadow-[0_0_12px_rgba(59,130,246,0.35)]"
                 : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
             }`}
           >
@@ -448,18 +537,24 @@ export default function DashboardPage() {
             <div>
               <span className="text-[#626E7E]">Confidence:</span>{" "}
               <strong className="text-white">
-                {activeIncident ? `${Math.round(activeIncident.confidence * 100)}%` : "99.8%"}
+                {activeIncident && typeof activeIncident.confidence === "number"
+                  ? `${Math.round(activeIncident.confidence * 100)}%`
+                  : "99.8%"}
               </strong>
             </div>
             <div>
               <span className="text-[#626E7E]">Anomaly Score:</span>{" "}
               <strong className={fleetState === "critical" ? "text-red-400" : "text-[#22C55E]"}>
-                {activeIncident ? activeIncident.anomaly_score.toFixed(2) : "0.04"}
+                {typeof activeIncident?.anomaly_score === "number"
+                  ? activeIncident.anomaly_score.toFixed(2)
+                  : activeIncident
+                  ? "0.95"
+                  : "0.04"}
               </strong>
             </div>
             <div>
               <span className="text-[#626E7E]">Incident ID:</span>{" "}
-              <strong className="text-[#3B82F6]">{activeIncident ? activeIncident.incident_id : "None"}</strong>
+              <strong className="text-[#3B82F6]">{activeIncident?.incident_id || "None"}</strong>
             </div>
           </div>
         </div>
@@ -530,11 +625,11 @@ export default function DashboardPage() {
               <Cpu className="w-4 h-4 text-[#C8F63B]" /> CPU Utilization
             </span>
             <span className="text-xs font-mono-code text-[#C8F63B] font-bold">
-              {(metrics.cpu_pct || 1.3).toFixed(1)}%
+              {(typeof metrics.cpu_pct === "number" ? metrics.cpu_pct : 1.3).toFixed(1)}%
             </span>
           </div>
           <p className="text-[10px] font-mono-code text-[#626E7E] mb-3">
-            {metrics.cpu_cores || 15} Cores Active • Load: {(metrics.load_1m || 0.13).toFixed(2)}
+            {metrics.cpu_cores || 15} Cores Active • Load: {(typeof metrics.load_1m === "number" ? metrics.load_1m : 0.13).toFixed(2)}
           </p>
           <div className="h-10 w-full overflow-hidden">
             <svg className="w-full h-full" viewBox="0 0 200 40" preserveAspectRatio="none">
@@ -550,7 +645,7 @@ export default function DashboardPage() {
               <Server className="w-4 h-4 text-[#3B82F6]" /> Memory Footprint
             </span>
             <span className="text-xs font-mono-code text-[#3B82F6] font-bold">
-              {(metrics.mem_pct || 13.8).toFixed(1)}%
+              {(typeof metrics.mem_pct === "number" ? metrics.mem_pct : 13.8).toFixed(1)}%
             </span>
           </div>
           <p className="text-[10px] font-mono-code text-[#626E7E] mb-3">
@@ -570,7 +665,7 @@ export default function DashboardPage() {
               <HardDrive className="w-4 h-4 text-purple-400" /> Persistent Storage
             </span>
             <span className="text-xs font-mono-code text-purple-400 font-bold">
-              {(metrics.disk_pct || 1.4).toFixed(1)}%
+              {(typeof metrics.disk_pct === "number" ? metrics.disk_pct : 1.4).toFixed(1)}%
             </span>
           </div>
           <p className="text-[10px] font-mono-code text-[#626E7E] mb-3">
@@ -580,7 +675,7 @@ export default function DashboardPage() {
             <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
               <div
                 className="bg-purple-400 h-full rounded-full transition-all duration-500"
-                style={{ width: `${Math.min(metrics.disk_pct || 1.4, 100)}%` }}
+                style={{ width: `${Math.min(typeof metrics.disk_pct === "number" ? metrics.disk_pct : 1.4, 100)}%` }}
               />
             </div>
           </div>
@@ -593,11 +688,11 @@ export default function DashboardPage() {
               <Wifi className="w-4 h-4 text-emerald-400" /> Network &amp; WAN Probe
             </span>
             <span className="text-xs font-mono-code text-emerald-400 font-bold">
-              {(metrics.latency_ms || 0.86).toFixed(2)} ms
+              {(typeof metrics.latency_ms === "number" ? metrics.latency_ms : 0.86).toFixed(2)} ms
             </span>
           </div>
           <p className="text-[10px] font-mono-code text-[#626E7E] mb-3">
-            Drop: {(metrics.packet_loss_pct || 0.0).toFixed(2)}% • RX: {(metrics.net_rx_kbps || 4.8).toFixed(1)} kbps
+            Drop: {(typeof metrics.packet_loss_pct === "number" ? metrics.packet_loss_pct : 0.0).toFixed(2)}% • RX: {(typeof metrics.net_rx_kbps === "number" ? metrics.net_rx_kbps : 4.8).toFixed(1)} kbps
           </p>
           <div className="h-10 w-full overflow-hidden">
             <svg className="w-full h-full" viewBox="0 0 200 40" preserveAspectRatio="none">

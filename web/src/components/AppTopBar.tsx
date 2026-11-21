@@ -16,6 +16,8 @@ import {
   PanelLeft,
   LogIn,
   UserPlus,
+  ShieldCheck,
+  LogOut,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
 
@@ -34,6 +36,8 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
     fleetState,
     secondsAgo,
     currentTime,
+    isAuthenticated,
+    logout,
   } = useTenant();
 
   const getBreadcrumbs = () => {
@@ -159,33 +163,69 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
             {currentTime || "18:00:00 UTC"}
           </div>
 
-          {/* Auth: Sign In & Create Account */}
-          <div className="flex items-center gap-1.5 relative z-50">
-            <Link
-              href="/login?tab=signin"
-              onClick={(e) => {
-                e.preventDefault();
-                router.push("/login?tab=signin");
-              }}
-              className="text-xs font-semibold bg-white/5 hover:bg-white/10 text-[#9AA4B2] hover:text-white border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer relative z-50 pointer-events-auto"
-              title="Sign In to Tenant Organization"
-            >
-              <LogIn className="w-3.5 h-3.5 text-[#3B82F6]" />
-              <span className="hidden sm:inline">Sign In</span>
-            </Link>
-            <Link
-              href="/login?tab=create"
-              onClick={(e) => {
-                e.preventDefault();
-                router.push("/login?tab=create");
-              }}
-              className="text-xs font-bold bg-[#C8F63B]/10 hover:bg-[#C8F63B]/20 text-[#C8F63B] border border-[#C8F63B]/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all whitespace-nowrap shadow-[0_0_12px_rgba(200,246,59,0.12)] hover:shadow-[0_0_16px_rgba(200,246,59,0.25)] cursor-pointer relative z-50 pointer-events-auto"
-              title="Create New Tenant Account"
-            >
-              <UserPlus className="w-3.5 h-3.5 text-[#C8F63B]" />
-              <span className="hidden md:inline">Create Account</span>
-              <span className="md:hidden">Join</span>
-            </Link>
+          {/* Auth State: Signed In Profile & Sign Out OR Sign In / Create Account */}
+          <div className="flex items-center gap-2 relative z-50">
+            {isAuthenticated ? (
+              <div className="flex items-center gap-2">
+                {/* Active Session Badge */}
+                <div className="flex items-center gap-2 bg-[#0D1117] border border-[#22C55E]/30 rounded-lg px-2.5 py-1.5 shadow-[0_0_12px_rgba(34,197,94,0.1)]">
+                  <div className="w-2 h-2 rounded-full bg-[#22C55E] animate-pulse shrink-0" />
+                  <ShieldCheck className="w-3.5 h-3.5 text-[#C8F63B] shrink-0" />
+                  <div className="flex flex-col text-left min-w-0">
+                    <span className="text-[11px] font-bold text-white tracking-tight leading-tight truncate max-w-[120px]">
+                      {currentTenant.tenant_name || currentTenant.name || "Authenticated"}
+                    </span>
+                    <span className="text-[9px] font-mono-code text-[#C8F63B] leading-none mt-0.5">
+                      VERIFIED AUTH
+                    </span>
+                  </div>
+                </div>
+
+                {/* Sign Out Button */}
+                <button
+                  id="btn-topbar-signout"
+                  onClick={() => {
+                    logout();
+                    router.push("/login?tab=signin");
+                  }}
+                  className="text-xs font-semibold bg-white/5 hover:bg-red-500/15 text-[#9AA4B2] hover:text-red-400 border border-white/10 hover:border-red-500/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer pointer-events-auto"
+                  title="Sign Out of Active Tenant Session"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
+              </div>
+            ) : (
+              <>
+                <Link
+                  id="btn-topbar-signin"
+                  href="/login?tab=signin"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    router.push("/login?tab=signin");
+                  }}
+                  className="text-xs font-semibold bg-white/5 hover:bg-white/10 text-[#9AA4B2] hover:text-white border border-white/10 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer relative z-50 pointer-events-auto"
+                  title="Sign In to Tenant Organization"
+                >
+                  <LogIn className="w-3.5 h-3.5 text-[#3B82F6]" />
+                  <span className="hidden sm:inline">Sign In</span>
+                </Link>
+                <Link
+                  id="btn-topbar-create"
+                  href="/login?tab=create"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    router.push("/login?tab=create");
+                  }}
+                  className="text-xs font-bold bg-[#C8F63B]/10 hover:bg-[#C8F63B]/20 text-[#C8F63B] border border-[#C8F63B]/30 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 transition-all whitespace-nowrap shadow-[0_0_12px_rgba(200,246,59,0.12)] hover:shadow-[0_0_16px_rgba(200,246,59,0.25)] cursor-pointer relative z-50 pointer-events-auto"
+                  title="Create New Tenant Account"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-[#C8F63B]" />
+                  <span className="hidden md:inline">Create Account</span>
+                  <span className="md:hidden">Join</span>
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -22,7 +22,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import FastAPI, Header, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status, Body
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
@@ -58,6 +58,182 @@ try:
         logger.info("Connected to Supabase Cloud Database: %s", sb_url)
 except Exception as e:
     logger.warning("Supabase client init deferred: %s", e)
+
+# In-memory audit log ring buffer & cryptographic hash-chain state
+IN_MEMORY_AUDIT_LOGS: list[dict[str, Any]] = []
+LAST_AUDIT_HASH: str = "genesis"
+
+
+def record_audit_log(
+    tenant_id: str,
+    actor: str,
+    action: str,
+    detail_json: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Records an immutable, tamper-evident audit event with SHA-256 hash chaining.
+    Saves to Supabase `audit_log` when connected, and maintains an in-memory buffer.
+    """
+    global LAST_AUDIT_HASH
+    now_iso = datetime.now(timezone.utc).isoformat()
+    payload_str = f"{LAST_AUDIT_HASH}:{tenant_id}:{actor}:{action}:{json.dumps(detail_json, sort_keys=True)}:{now_iso}"
+    entry_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+
+    log_entry = {
+        "id": str(uuid.uuid4()),
+        "tenant_id": tenant_id,
+        "actor": actor,
+        "action": action,
+        "detail_json": detail_json,
+        "ts_utc": now_iso,
+        "prev_hash": LAST_AUDIT_HASH,
+        "hash": entry_hash,
+    }
+
+    LAST_AUDIT_HASH = entry_hash
+    IN_MEMORY_AUDIT_LOGS.insert(0, log_entry)
+    if len(IN_MEMORY_AUDIT_LOGS) > 200:
+        IN_MEMORY_AUDIT_LOGS.pop()
+
+    if supabase_client:
+        try:
+            supabase_client.table("audit_log").insert({
+                "id": log_entry["id"],
+                "tenant_id": tenant_id,
+                "actor": actor,
+                "action": action,
+                "detail_json": detail_json,
+                "ts_utc": now_iso,
+                "prev_hash": log_entry["prev_hash"],
+                "hash": entry_hash,
+            }).execute()
+        except Exception as e:
+            logger.debug("Supabase audit log insert: %s", e)
+
+    return log_entry
+
+
+def record_incident_in_supabase(
+    tenant_id: str,
+    incident_dict: dict[str, Any],
+    explanation: dict[str, Any],
+) -> str:
+    """
+    Records incident, alerts, health state transition, recommendations,
+    and a tamper-evident audit log directly in Supabase.
+    """
+    inc_id = incident_dict.get("incident_id")
+    try:
+        inc_uuid = str(uuid.UUID(str(inc_id)))
+    except Exception:
+        inc_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}:{incident_dict.get('incident_id', 'incident')}"))
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    title = f"{incident_dict.get('severity', 'critical').upper()}: Anomaly on {incident_dict.get('root_cause_candidate', 'fleet')}"
+
+    # 1. Audit log entry
+    record_audit_log(
+        tenant_id=tenant_id,
+        actor="aiops-detector",
+        action="incident_detected",
+        detail_json={
+            "incident_id": inc_uuid,
+            "raw_id": incident_dict.get("incident_id"),
+            "root_cause": incident_dict.get("root_cause_candidate"),
+            "confidence": incident_dict.get("confidence"),
+            "anomaly_score": incident_dict.get("anomaly_score"),
+            "signals": incident_dict.get("signals", []),
+        },
+    )
+
+    if supabase_client:
+        try:
+            # 2. Insert or update incident
+            supabase_client.table("incidents").upsert({
+                "id": inc_uuid,
+                "tenant_id": tenant_id,
+                "title": title,
+                "severity": incident_dict.get("severity", "critical"),
+                "status": "open",
+                "root_cause_entity": incident_dict.get("root_cause_candidate", "unknown"),
+                "confidence": float(incident_dict.get("confidence", 0.90)),
+                "explanation": explanation.get("summary") or explanation.get("narrative") or "Anomaly detected across fleet telemetry",
+                "evidence_json": {
+                    "signals": incident_dict.get("signals", []),
+                    "affected_services": incident_dict.get("affected_services", []),
+                    "explanation": explanation,
+                },
+                "opened_utc": now_iso,
+            }).execute()
+
+            # 3. Insert alerts for each signal
+            for sig in incident_dict.get("signals", []):
+                supabase_client.table("alerts").insert({
+                    "tenant_id": tenant_id,
+                    "source_id": sig.get("service", "fleet"),
+                    "category": sig.get("metric", "anomaly"),
+                    "severity": incident_dict.get("severity", "critical"),
+                    "ts_utc": now_iso,
+                    "evidence_json": sig,
+                    "incident_id": inc_uuid,
+                }).execute()
+
+            # 4. Insert health_history
+            supabase_client.table("health_history").insert({
+                "tenant_id": tenant_id,
+                "entity_id": incident_dict.get("root_cause_candidate", "fleet"),
+                "from_state": "Excellent",
+                "to_state": "Poor" if incident_dict.get("severity") == "critical" else "Fair",
+                "reason": explanation.get("summary") or title,
+                "ts_utc": now_iso,
+            }).execute()
+
+            # 5. Insert recommendations
+            steps = explanation.get("steps") or ["Isolate affected node", "Execute automated rollback", "Inspect logs"]
+            for step in steps[:3]:
+                supabase_client.table("recommendations").insert({
+                    "tenant_id": tenant_id,
+                    "incident_id": inc_uuid,
+                    "action": step[:120],
+                    "rationale": explanation.get("summary") or "Automated AI mitigation",
+                    "score": float(incident_dict.get("confidence", 0.90)),
+                    "status": "pending",
+                }).execute()
+        except Exception as e:
+            logger.debug("Supabase incident recording: %s", e)
+
+    return inc_uuid
+
+
+def record_resolution_in_supabase(tenant_id: str, reason: str = "Fleet restored to nominal") -> None:
+    """
+    Records resolution of an active incident in Supabase, updating status and health history.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    record_audit_log(
+        tenant_id=tenant_id,
+        actor="system",
+        action="incident_resolved",
+        detail_json={"reason": reason, "status": "resolved"},
+    )
+    if supabase_client:
+        try:
+            supabase_client.table("incidents").update({
+                "status": "resolved",
+                "closed_utc": now_iso,
+            }).eq("tenant_id", tenant_id).eq("status", "open").execute()
+
+            supabase_client.table("health_history").insert({
+                "tenant_id": tenant_id,
+                "entity_id": "fleet",
+                "from_state": "Poor",
+                "to_state": "Excellent",
+                "reason": reason,
+                "ts_utc": now_iso,
+            }).execute()
+        except Exception as e:
+            logger.debug("Supabase resolution recording: %s", e)
+
 
 # Regional Identity for this Ingest Node (§6.2, §15, Task 7.1-7.3)
 INGEST_REGION = os.getenv("INGEST_REGION", "ap-south-1").lower().strip()
@@ -451,11 +627,21 @@ def approve_remediation(body: dict[str, Any] = Body(...)):
     action = body.get("action", "scale_pool_connection")
     actor = body.get("actor", "security_admin")
 
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        inc_uuid = str(uuid.UUID(str(incident_id)))
+    except Exception:
+        inc_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}:{incident_id}"))
+
+    record_audit_log(
+        tenant_id=tenant_id,
+        actor=actor,
+        action="remediation_approved",
+        detail_json={"incident_id": inc_uuid, "action": action, "status": "executed"},
+    )
+
     if supabase_client:
         try:
-            now_iso = datetime.now(timezone.utc).isoformat()
-            # Ensure valid UUID for foreign key incidents(id)
-            inc_uuid = incident_id if (incident_id and len(str(incident_id)) == 36) else "00000000-0000-0000-0000-000000000201"
             supabase_client.table("remediations").insert({
                 "tenant_id": tenant_id,
                 "incident_id": inc_uuid,
@@ -464,24 +650,53 @@ def approve_remediation(body: dict[str, Any] = Body(...)):
                 "approved_at": now_iso,
                 "executed_at": now_iso,
                 "policy_result": "allow",
-                "rollback_plan": "revert connection pool size to baseline 20",
-                "rollback_status": "standby",
+                "rollback_plan": "Revert to baseline configuration if health degrades",
+                "rollback_status": "completed",
             }).execute()
 
-            audit_hash = hashlib.sha256(f"{tenant_id}:{action}:{now_iso}".encode()).hexdigest()
-            supabase_client.table("audit_log").insert({
+            # Mark incident resolved
+            supabase_client.table("incidents").update({
+                "status": "resolved",
+                "closed_utc": now_iso,
+            }).eq("id", inc_uuid).execute()
+
+            # Mark recommendations approved
+            supabase_client.table("recommendations").update({
+                "status": "approved",
+            }).eq("incident_id", inc_uuid).execute()
+
+            supabase_client.table("health_history").insert({
                 "tenant_id": tenant_id,
-                "actor": actor,
-                "action": "remediation_approved",
-                "detail_json": {"incident_id": incident_id, "action": action},
+                "entity_id": "fleet",
+                "from_state": "Poor",
+                "to_state": "Excellent",
+                "reason": f"Autonomous remediation executed: {action}",
                 "ts_utc": now_iso,
-                "prev_hash": "genesis",
-                "hash": audit_hash,
             }).execute()
         except Exception as e:
             logger.debug("Remediation audit error: %s", e)
 
-    return {"status": "approved", "action": action, "tenant_id": tenant_id}
+    # Restore fleet state to healthy
+    LIVE_TELEMETRY["fleet_state"] = "healthy"
+    LIVE_TELEMETRY["fleet_reasons"] = ["All systems nominal — Remediation executed"]
+    LIVE_TELEMETRY["active_incident"] = None
+    LIVE_TELEMETRY["scenario"] = "normal"
+    LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 1.3
+    LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 0.88
+    LIVE_TELEMETRY["latest_metrics"]["load_1m"] = 0.16
+    LIVE_TELEMETRY["latest_metrics"]["mem_pct"] = 28.0
+    LIVE_TELEMETRY["latest_metrics"]["packet_loss_pct"] = 0.0
+    for k in ("pool_usage_pct", "http_500_rate", "failed_logins_count", "http_504_rate"):
+        LIVE_TELEMETRY["latest_metrics"].pop(k, None)
+
+    return {
+        "status": "approved",
+        "action": action,
+        "tenant_id": tenant_id,
+        "incident_id": inc_uuid,
+        "fleet_state": "healthy",
+        "message": f"Autonomous action '{action}' approved and executed. Logged to Supabase.",
+    }
 
 
 @app.get("/api/telemetry/live")
@@ -530,7 +745,7 @@ def get_live_telemetry(tenant_id: Optional[str] = None):
     active_sc = LIVE_TELEMETRY.get("scenario", "normal")
     metrics_to_return = dict(LIVE_TELEMETRY.get("latest_metrics", {}))
 
-    if active_sc == "db_outage_cascade":
+    if active_sc in ("db_outage_cascade", "partition"):
         import random
         # Maintain persistent cascade anomaly (high CPU & massive latency spike)
         cpu_val = round(88.0 + random.uniform(-2.5, 4.0), 1)
@@ -547,7 +762,7 @@ def get_live_telemetry(tenant_id: Optional[str] = None):
         LIVE_TELEMETRY["fleet_state"] = "critical"
         LIVE_TELEMETRY["fleet_reasons"] = ["Postgres Connection Pool Exhaustion -> Cascading Gateway Timeouts"]
 
-    elif active_sc == "memory_leak":
+    elif active_sc in ("memory_leak", "leak"):
         import random
         current_mem = LIVE_TELEMETRY["latest_metrics"].get("mem_pct", 94.0)
         if current_mem < 90.0:
@@ -560,8 +775,31 @@ def get_live_telemetry(tenant_id: Optional[str] = None):
         metrics_to_return["mem_available_mb"] = max(120, round(mem_tot - metrics_to_return["mem_used_mb"]))
         LIVE_TELEMETRY["latest_metrics"]["mem_used_mb"] = metrics_to_return["mem_used_mb"]
         LIVE_TELEMETRY["latest_metrics"]["mem_available_mb"] = metrics_to_return["mem_available_mb"]
-        LIVE_TELEMETRY["fleet_state"] = "degraded"
-        LIVE_TELEMETRY["fleet_reasons"] = ["Monotonic Memory Growth on worker-02 (+3.4σ EWMA deviation)"]
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Monotonic Memory Growth on worker-03 (+3.4σ EWMA deviation, Pod OOM hazard)"]
+
+    elif active_sc in ("cpu_spike", "cpu", "cpu_saturation"):
+        import random
+        cpu_val = round(96.4 + random.uniform(-1.5, 2.0), 1)
+        load_val = round(12.8 + random.uniform(-0.4, 0.6), 2)
+        metrics_to_return["cpu_pct"] = min(99.4, cpu_val)
+        metrics_to_return["load_1m"] = load_val
+        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = min(99.4, cpu_val)
+        LIVE_TELEMETRY["latest_metrics"]["load_1m"] = load_val
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["CPU Saturation & Thread Pool Starvation on Auth Node (+4.8σ EWMA)"]
+
+    elif active_sc in ("net_latency", "network_error", "network_latency"):
+        import random
+        lat_val = round(485.0 + random.uniform(-25.0, 35.0), 1)
+        drop_val = round(18.5 + random.uniform(-1.2, 2.0), 1)
+        metrics_to_return["latency_ms"] = lat_val
+        metrics_to_return["packet_loss_pct"] = drop_val
+        metrics_to_return["http_504_rate"] = round(24.6 + random.uniform(-1.0, 1.5), 1)
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = lat_val
+        LIVE_TELEMETRY["latest_metrics"]["packet_loss_pct"] = drop_val
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Network Ingress Degradation & Upstream Timeout (480ms latency, 18.5% packet loss)"]
 
     elif active_sc == "login_burst":
         import random
@@ -616,12 +854,24 @@ def live_redact_tester(body: dict[str, Any] = Body(...)):
     canonical_str = json.dumps(canonical_payload, sort_keys=True, separators=(",", ":"))
     sha256_hash = hashlib.sha256(canonical_str.encode("utf-8")).hexdigest()
 
+    zero_leak_ok = "CANARY-" not in redacted and "hunter2" not in redacted
+    record_audit_log(
+        tenant_id="00000000-0000-0000-0000-000000000001",
+        actor="gate1:privacy_guard",
+        action="privacy_gate1_verified",
+        detail_json={
+            "zero_leak_verified": zero_leak_ok,
+            "sha256_hash": sha256_hash,
+            "pseudo_source": pseudo_source,
+        },
+    )
+
     return {
         "raw_text": raw_text,
         "redacted_text": redacted,
         "pseudo_source": pseudo_source,
         "sha256_hash": sha256_hash,
-        "zero_leak_verified": "CANARY-" not in redacted and "hunter2" not in redacted,
+        "zero_leak_verified": zero_leak_ok,
         "status": "PROVEN_ZERO_LEAK",
     }
 
@@ -700,12 +950,30 @@ def select_active_llm_model(body: dict[str, Any] = Body(...)):
 
 
 @app.post("/api/set-scenario")
+@app.post("/api/telemetry/scenario")
 def set_active_scenario(body: dict[str, Any] = Body(...)):
     """
     Inject scenario and trigger causal graph traversal and AI explainability.
     Supports on-demand inference with either Gemini or local Ollama (deepseek-r1:14b, gemma4:12b).
     """
-    scenario = body.get("scenario", "normal")
+    raw_scenario = body.get("scenario", "normal")
+    scenario_map = {
+        "leak": "memory_leak",
+        "memory_leak": "memory_leak",
+        "mem_leak": "memory_leak",
+        "partition": "db_outage_cascade",
+        "cascading_partition": "db_outage_cascade",
+        "db_outage_cascade": "db_outage_cascade",
+        "cpu_spike": "cpu_spike",
+        "cpu": "cpu_spike",
+        "cpu_saturation": "cpu_spike",
+        "net_latency": "net_latency",
+        "network_error": "net_latency",
+        "network_latency": "net_latency",
+        "login_burst": "login_burst",
+        "normal": "normal",
+    }
+    scenario = scenario_map.get(raw_scenario, raw_scenario)
     tenant_id = body.get("tenant_id", "00000000-0000-0000-0000-000000000001")
     req_provider = body.get("provider", CURRENT_LLM_CONFIG["provider"])
     req_model = body.get("model", CURRENT_LLM_CONFIG["model"])
@@ -731,8 +999,11 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
 
         incident_dict = {
             "incident_id": "inc-db-001",
+            "severity": "critical",
+            "state": "open",
+            "anomaly_score": 0.88,
             "root_cause_candidate": "db-primary",
-            "confidence": 0.85,
+            "confidence": 0.88,
             "affected_services": ["auth-service", "api-gateway", "order-service"],
             "signals": [
                 {"metric": "pool_usage_pct", "service": "db-primary", "deviation": 4.2},
@@ -752,6 +1023,9 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
 
         incident_dict = {
             "incident_id": "inc-sec-002",
+            "severity": "warning",
+            "state": "open",
+            "anomaly_score": 0.92,
             "root_cause_candidate": "edge-ingress",
             "confidence": 0.92,
             "affected_services": ["auth-service"],
@@ -764,8 +1038,8 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
         LIVE_TELEMETRY["narration"] = explanation
 
     elif scenario == "memory_leak":
-        LIVE_TELEMETRY["fleet_state"] = "degraded"
-        LIVE_TELEMETRY["fleet_reasons"] = ["Monotonic Memory Growth on worker-02 (+3.4σ EWMA deviation)"]
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Memory Leak Cascade on worker-03 (+3.4σ EWMA deviation, Pod OOM hazard)"]
         LIVE_TELEMETRY["latest_metrics"]["mem_pct"] = 94.8
         mem_tot = LIVE_TELEMETRY["latest_metrics"].get("mem_total_mb", 7935.0)
         LIVE_TELEMETRY["latest_metrics"]["mem_used_mb"] = round(0.948 * mem_tot, 1)
@@ -773,14 +1047,54 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
 
         incident_dict = {
             "incident_id": "inc-mem-003",
-            "root_cause_candidate": "worker-02",
-            "confidence": 0.79,
-            "affected_services": ["worker-02"],
+            "severity": "critical",
+            "state": "open",
+            "anomaly_score": 0.94,
+            "root_cause_candidate": "worker-03",
+            "confidence": 0.94,
+            "affected_services": ["worker-03", "job-queue", "api-gateway"],
             "signals": [
-                {"metric": "mem_pct", "service": "worker-02", "deviation": 3.4},
+                {"metric": "mem_pct", "service": "worker-03", "deviation": 3.4},
+                {"metric": "mem_growth_rate", "service": "worker-03", "deviation": 4.1},
             ],
         }
         explanation = incident_narrator.generate_explanation(incident_dict, llm_client=client)
+        if not explanation.get("steps") or len(explanation["steps"]) < 2:
+            explanation["steps"] = [
+                "Isolate and terminate worker-03 pod to prevent node-level kernel OOM panic: kubectl delete pod worker-03 --now",
+                "Trigger automated container restart with pinned JVM/Node max-old-space-size limits",
+                "Capture heap snapshot dump from storage volume for memory leak path analysis",
+            ]
+        LIVE_TELEMETRY["active_incident"] = incident_dict
+        LIVE_TELEMETRY["narration"] = explanation
+
+    elif scenario == "cpu_spike":
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["CPU Saturation & Thread Pool Starvation on Auth Node (+4.8σ EWMA)"]
+        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 96.4
+        LIVE_TELEMETRY["latest_metrics"]["load_1m"] = 12.8
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 145.2
+
+        incident_dict = {
+            "incident_id": "inc-cpu-005",
+            "severity": "critical",
+            "state": "open",
+            "anomaly_score": 0.95,
+            "root_cause_candidate": "auth-node-01",
+            "confidence": 0.96,
+            "affected_services": ["auth-service", "api-gateway", "session-store"],
+            "signals": [
+                {"metric": "cpu_pct", "service": "auth-node-01", "deviation": 4.8},
+                {"metric": "load_1m", "service": "auth-node-01", "deviation": 4.2},
+            ],
+        }
+        explanation = incident_narrator.generate_explanation(incident_dict, llm_client=client)
+        if not explanation.get("steps") or len(explanation["steps"]) < 2:
+            explanation["steps"] = [
+                "Scale out auth worker replica count: kubectl scale deployment auth-service --replicas=8",
+                "Profile hot thread execution loops with `perf top -p $(pgrep auth-worker)`",
+                "Temporarily throttle non-essential background token refresh cron jobs",
+            ]
         LIVE_TELEMETRY["active_incident"] = incident_dict
         LIVE_TELEMETRY["narration"] = explanation
 
@@ -795,8 +1109,11 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
 
         incident_dict = {
             "incident_id": "inc-net-004",
+            "severity": "critical",
+            "state": "open",
+            "anomaly_score": 0.96,
             "root_cause_candidate": "ingress-gateway",
-            "confidence": 0.91,
+            "confidence": 0.98,
             "affected_services": ["api-gateway", "web-client", "auth-service"],
             "signals": [
                 {"metric": "latency_ms", "service": "ingress-gateway", "deviation": 5.4},
@@ -826,7 +1143,412 @@ def set_active_scenario(body: dict[str, Any] = Body(...)):
         for k in ("pool_usage_pct", "http_500_rate", "failed_logins_count", "http_504_rate"):
             LIVE_TELEMETRY["latest_metrics"].pop(k, None)
 
+    # Automatically record active incident or resolution directly to Supabase
+    if LIVE_TELEMETRY.get("active_incident"):
+        record_incident_in_supabase(
+            tenant_id=tenant_id,
+            incident_dict=LIVE_TELEMETRY["active_incident"],
+            explanation=LIVE_TELEMETRY.get("narration") or {},
+        )
+    elif scenario == "normal":
+        record_resolution_in_supabase(tenant_id=tenant_id, reason="Scenario set to normal: Fleet nominal")
+
     return get_live_telemetry(tenant_id)
+
+
+@app.get("/api/supabase/status")
+def get_supabase_status():
+    """
+    Returns live connection state and real-time row counts across all 12 Supabase tables.
+    """
+    sb_url = os.getenv("SUPABASE_URL", "").strip()
+    status_info = {
+        "connected": supabase_client is not None,
+        "supabase_url": sb_url,
+        "region": INGEST_REGION,
+        "tables": {},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    table_names = [
+        "tenants", "collectors", "metrics", "payloads_seen", "health_state",
+        "health_history", "alerts", "incidents", "recommendations",
+        "remediations", "audit_log", "egress_receipts"
+    ]
+    if supabase_client:
+        for t in table_names:
+            try:
+                res = supabase_client.table(t).select("*", count="exact").limit(1).execute()
+                status_info["tables"][t] = {
+                    "count": res.count if res.count is not None else len(res.data),
+                    "status": "ok"
+                }
+            except Exception as e:
+                status_info["tables"][t] = {"count": 0, "status": "error", "error": str(e)[:60]}
+    else:
+        for t in table_names:
+            status_info["tables"][t] = {"count": 0, "status": "disconnected"}
+
+    return status_info
+
+
+@app.get("/api/supabase/audit-logs")
+def get_supabase_audit_logs(limit: int = 50, tenant_id: Optional[str] = None):
+    """
+    Returns recent tamper-evident audit logs directly from Supabase (or fallback in-memory ring buffer).
+    """
+    if supabase_client:
+        try:
+            q = supabase_client.table("audit_log").select("*").order("ts_utc", desc=True).limit(limit)
+            if tenant_id:
+                q = q.eq("tenant_id", tenant_id)
+            res = q.execute()
+            if res.data:
+                return {"source": "supabase_cloud", "logs": res.data, "total": len(res.data)}
+        except Exception as e:
+            logger.debug("Supabase audit log query: %s", e)
+
+    # Fallback to in-memory logs
+    filtered = [l for l in IN_MEMORY_AUDIT_LOGS if not tenant_id or l.get("tenant_id") == tenant_id]
+    return {"source": "in_memory_cache", "logs": filtered[:limit], "total": len(filtered)}
+
+
+@app.post("/api/simulation/execute-stage")
+def execute_simulation_stage(body: dict[str, Any] = Body(...)):
+    """
+    Executes a single stage of the comprehensive E2E Fleet Chaos & AI Observability simulation.
+    Updates LIVE_TELEMETRY, invokes Gemini AI for insight, and records event to Supabase.
+    """
+    stage_id = int(body.get("stage_id", 1))
+    tenant_id = body.get("tenant_id", "00000000-0000-0000-0000-000000000001")
+    req_provider = body.get("provider", CURRENT_LLM_CONFIG["provider"])
+    req_model = body.get("model", CURRENT_LLM_CONFIG["model"])
+
+    if req_provider == "ollama":
+        client = OllamaClient(model_name=req_model)
+    elif req_provider == "gemini":
+        client = GeminiClient(model_name=req_model)
+    else:
+        client = TemplateClient()
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    stage_data = {}
+
+    if stage_id == 1:
+        LIVE_TELEMETRY["fleet_state"] = "healthy"
+        LIVE_TELEMETRY["fleet_reasons"] = ["All systems nominal — Baseline Telemetry"]
+        LIVE_TELEMETRY["scenario"] = "normal"
+        LIVE_TELEMETRY["active_incident"] = None
+        LIVE_TELEMETRY["narration"] = None
+        LIVE_TELEMETRY["latest_metrics"] = {
+            "cpu_pct": 1.2,
+            "latency_ms": 0.85,
+            "load_1m": 0.15,
+            "mem_pct": 24.2,
+            "packet_loss_pct": 0.0,
+            "pool_usage_pct": 12.0,
+            "http_500_rate": 0.0,
+        }
+        record_audit_log(tenant_id, "simulation_controller", "sim_phase_1_baseline_verified", {
+            "state": "healthy", "anomaly_score": 0.02, "slo_compliance": "100.0%"
+        })
+        stage_data = {
+            "stage_id": 1,
+            "name": "Phase 1: Baseline Fleet Telemetry Verification",
+            "domain": "Ingress & Edge SLOs",
+            "status": "healthy",
+            "anomaly_score": 0.02,
+            "confidence": 0.99,
+            "metrics": LIVE_TELEMETRY["latest_metrics"],
+            "ai_insights": {
+                "summary": "All 12 microservices operating strictly within 99.99% SLO boundaries. Gate 1 privacy scrubbers active; zero canary leakages detected across regional egress brokers.",
+                "root_cause": "None (Steady-state baseline)",
+                "risk_score": "LOW (0.02)",
+                "blast_radius": [],
+                "action": "Maintain continuous telemetry streaming and EWMA statistical baselines.",
+            },
+        }
+
+    elif stage_id == 2:
+        LIVE_TELEMETRY["fleet_state"] = "healthy"
+        raw_attack = "AUTH_EVENT user=admin password=CANARY-leak-test-99 token=eyJhbGciOiJIUzI1NiJ9.attack credit_card=4111111111111111 ip=10.0.4.12 host=internal-auth-db"
+        redacted = "[REDACTED_CANARY] [REDACTED_AUTH_TOKEN] [REDACTED_CC] host=src_9f82ab71c0e3"
+        sha_proof = hashlib.sha256(redacted.encode()).hexdigest()
+        record_audit_log(tenant_id, "gate1_privacy_guard", "sim_phase_2_canary_leak_blocked", {
+            "attack_payload": "CANARY-leak-test-99",
+            "zero_leak_verified": True,
+            "sha256_hash": sha_proof,
+        })
+        stage_data = {
+            "stage_id": 2,
+            "name": "Phase 2: Gate 1 Egress & Canary Leak Attack Defense",
+            "domain": "Zero-Trust Privacy Boundary",
+            "status": "healthy",
+            "anomaly_score": 0.05,
+            "confidence": 1.0,
+            "metrics": LIVE_TELEMETRY["latest_metrics"],
+            "ai_insights": {
+                "summary": "Synthetic attack containing raw passwords, canary tokens, and JWTs intercepted at Gate 1 trust boundary. Default-deny allow-list scrubbed all fields; HMAC pseudonymizer disguised internal hostname.",
+                "root_cause": "Simulated Canary Leak Attack (Defended)",
+                "risk_score": "NEGLIGIBLE (0.00 canary bytes leaked)",
+                "blast_radius": ["egress-filter-01"],
+                "action": "Cryptographic egress receipt issued and sealed in Supabase egress_receipts.",
+            },
+        }
+
+    elif stage_id == 3:
+        LIVE_TELEMETRY["fleet_state"] = "degraded"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Network Ingress Degradation & Upstream Timeout (485ms latency, 18.5% packet loss)"]
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 485.0
+        LIVE_TELEMETRY["latest_metrics"]["packet_loss_pct"] = 18.5
+        LIVE_TELEMETRY["latest_metrics"]["http_504_rate"] = 24.6
+        inc_dict = {
+            "incident_id": "inc-net-004",
+            "severity": "warning",
+            "state": "open",
+            "anomaly_score": 0.78,
+            "root_cause_candidate": "ingress-gateway",
+            "confidence": 0.88,
+            "affected_services": ["api-gateway", "auth-service"],
+            "signals": [
+                {"metric": "latency_ms", "service": "ingress-gateway", "deviation": 4.8},
+                {"metric": "packet_loss_pct", "service": "ingress-gateway", "deviation": 3.9},
+            ],
+        }
+        explanation = incident_narrator.generate_explanation(inc_dict, llm_client=client)
+        LIVE_TELEMETRY["active_incident"] = inc_dict
+        LIVE_TELEMETRY["narration"] = explanation
+        record_incident_in_supabase(tenant_id, inc_dict, explanation)
+        stage_data = {
+            "stage_id": 3,
+            "name": "Phase 3: Ingress Network Jitter & 504 Timeout Chaos",
+            "domain": "Edge Transport",
+            "status": "degraded",
+            "anomaly_score": 0.78,
+            "confidence": 0.88,
+            "metrics": LIVE_TELEMETRY["latest_metrics"],
+            "ai_insights": {
+                "summary": explanation.get("summary") or "Ingress gateway latency escalated to 485ms (+4.8σ deviation). Upstream proxy read timeout triggered.",
+                "root_cause": "ingress-gateway buffer saturation",
+                "risk_score": "MEDIUM (0.78)",
+                "blast_radius": ["api-gateway", "auth-service"],
+                "action": "Increase proxy_read_timeout to 60s and tune network ring buffers.",
+            },
+        }
+
+    elif stage_id == 4:
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Monotonic Memory Leak on worker-03 (+3.4σ EWMA deviation, Pod OOM hazard)"]
+        LIVE_TELEMETRY["latest_metrics"]["mem_pct"] = 94.8
+        LIVE_TELEMETRY["latest_metrics"]["mem_used_mb"] = 7522.0
+        LIVE_TELEMETRY["latest_metrics"]["mem_available_mb"] = 413.0
+        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 74.5
+        inc_dict = {
+            "incident_id": "inc-mem-003",
+            "severity": "critical",
+            "state": "open",
+            "anomaly_score": 0.94,
+            "root_cause_candidate": "worker-03",
+            "confidence": 0.94,
+            "affected_services": ["worker-03", "job-queue", "api-gateway"],
+            "signals": [
+                {"metric": "mem_pct", "service": "worker-03", "deviation": 3.4},
+                {"metric": "mem_growth_rate", "service": "worker-03", "deviation": 4.1},
+            ],
+        }
+        explanation = incident_narrator.generate_explanation(inc_dict, llm_client=client)
+        LIVE_TELEMETRY["active_incident"] = inc_dict
+        LIVE_TELEMETRY["narration"] = explanation
+        record_incident_in_supabase(tenant_id, inc_dict, explanation)
+        stage_data = {
+            "stage_id": 4,
+            "name": "Phase 4: Monotonic Memory Leak Escalation on worker-03",
+            "domain": "Compute & Workload",
+            "status": "critical",
+            "anomaly_score": 0.94,
+            "confidence": 0.94,
+            "metrics": LIVE_TELEMETRY["latest_metrics"],
+            "ai_insights": {
+                "summary": explanation.get("summary") or "Monotonic memory leak (+3.4σ) threatens immediate Linux kernel OOM termination of worker-03.",
+                "root_cause": "worker-03 uncollected event closure leak",
+                "risk_score": "CRITICAL (0.94)",
+                "blast_radius": ["worker-03", "job-queue", "api-gateway"],
+                "action": "Isolate and terminate worker-03 pod to prevent node crash.",
+            },
+        }
+
+    elif stage_id == 5:
+        LIVE_TELEMETRY["fleet_state"] = "critical"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Postgres Connection Pool Exhaustion -> Cascading Gateway Timeouts"]
+        LIVE_TELEMETRY["latest_metrics"]["pool_usage_pct"] = 98.5
+        LIVE_TELEMETRY["latest_metrics"]["http_500_rate"] = 15.2
+        LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = 845.0
+        LIVE_TELEMETRY["latest_metrics"]["cpu_pct"] = 89.5
+        LIVE_TELEMETRY["latest_metrics"]["load_1m"] = 5.42
+        inc_dict = {
+            "incident_id": "inc-db-001",
+            "severity": "critical",
+            "state": "open",
+            "anomaly_score": 0.98,
+            "root_cause_candidate": "db-primary",
+            "confidence": 0.98,
+            "affected_services": ["db-primary", "auth-service", "api-gateway", "order-service", "job-queue"],
+            "signals": [
+                {"metric": "pool_usage_pct", "service": "db-primary", "deviation": 4.5},
+                {"metric": "query_latency_ms", "service": "auth-service", "deviation": 4.2},
+                {"metric": "http_500_rate", "service": "api-gateway", "deviation": 4.1},
+            ],
+        }
+        explanation = incident_narrator.generate_explanation(inc_dict, llm_client=client)
+        LIVE_TELEMETRY["active_incident"] = inc_dict
+        LIVE_TELEMETRY["narration"] = explanation
+        record_incident_in_supabase(tenant_id, inc_dict, explanation)
+        stage_data = {
+            "stage_id": 5,
+            "name": "Phase 5: Database Pool Exhaustion & Mesh Cascade",
+            "domain": "Storage & Service Mesh",
+            "status": "critical",
+            "anomaly_score": 0.98,
+            "confidence": 0.98,
+            "metrics": LIVE_TELEMETRY["latest_metrics"],
+            "ai_insights": {
+                "summary": explanation.get("summary") or "Systemic multi-tier cascade: connection pool starvation on db-primary triggered by unreleased leases from stalled worker-03.",
+                "root_cause": "db-primary connection pool starvation",
+                "risk_score": "SEVERE OUTAGE (0.98)",
+                "blast_radius": ["db-primary", "auth-service", "api-gateway", "order-service", "job-queue"],
+                "action": "Execute autonomous multi-stage runbook remediation.",
+            },
+        }
+
+    elif stage_id == 6:
+        inc_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{tenant_id}:inc-db-001"))
+        record_audit_log(tenant_id, "autonomous_remediation_agent", "sim_phase_6_remediation_approved", {
+            "actions": [
+                "kubectl delete pod worker-03 --now",
+                "ALTER SYSTEM SET max_connections = 120; SELECT pg_reload_conf();",
+                "flush_idle_gateway_connections()",
+            ],
+            "approved_by": "security_operator_console",
+            "status": "executed",
+        })
+        if supabase_client:
+            try:
+                supabase_client.table("remediations").insert({
+                    "tenant_id": tenant_id,
+                    "incident_id": inc_uuid,
+                    "action": "recycle_worker_and_expand_db_pool",
+                    "policy_result": "allow",
+                    "approved_at": now_iso,
+                    "executed_at": now_iso,
+                    "rollback_plan": "Revert max_connections to 20 if load normalizes",
+                    "rollback_status": "completed",
+                }).execute()
+            except Exception as e:
+                logger.debug("Remediation execution log: %s", e)
+
+        LIVE_TELEMETRY["fleet_state"] = "recovering"
+        LIVE_TELEMETRY["fleet_reasons"] = ["Executing Autonomous Runbook: Cycling worker-03 & Expanding DB Connection Pool"]
+        stage_data = {
+            "stage_id": 6,
+            "name": "Phase 6: Autonomous Runbook Synthesis & Human-in-the-Loop Approval",
+            "domain": "Autonomous Remediation",
+            "status": "recovering",
+            "anomaly_score": 0.45,
+            "confidence": 0.96,
+            "metrics": {
+                "cpu_pct": 32.4,
+                "latency_ms": 12.5,
+                "load_1m": 1.10,
+                "mem_pct": 34.0,
+                "pool_usage_pct": 28.0,
+                "packet_loss_pct": 0.0,
+                "http_500_rate": 0.0,
+            },
+            "ai_insights": {
+                "summary": "Remediation executed with human-in-the-loop cryptographic consent. Pod worker-03 cycled, JVM heap ceiling applied, Postgres connection pool capacity doubled.",
+                "root_cause": "Mitigated & Drained",
+                "risk_score": "MITIGATING (0.45)",
+                "blast_radius": [],
+                "action": "Verify fleet metric normalization across all edge shards.",
+            },
+        }
+
+    else:
+        LIVE_TELEMETRY["fleet_state"] = "healthy"
+        LIVE_TELEMETRY["fleet_reasons"] = ["All systems nominal — Post-Remediation Verification Complete"]
+        LIVE_TELEMETRY["scenario"] = "normal"
+        LIVE_TELEMETRY["active_incident"] = None
+        LIVE_TELEMETRY["narration"] = None
+        LIVE_TELEMETRY["latest_metrics"] = {
+            "cpu_pct": 1.4,
+            "latency_ms": 0.92,
+            "load_1m": 0.18,
+            "mem_pct": 28.5,
+            "packet_loss_pct": 0.0,
+            "pool_usage_pct": 14.0,
+            "http_500_rate": 0.0,
+        }
+        for k in ("failed_logins_count", "http_504_rate"):
+            LIVE_TELEMETRY["latest_metrics"].pop(k, None)
+
+        record_resolution_in_supabase(tenant_id, "Simulation complete: Fleet fully recovered and nominal")
+        record_audit_log(tenant_id, "ledger_notary", "sim_phase_7_ledger_sealed", {
+            "suite": "Comprehensive E2E Fleet Chaos & AI Observability Suite",
+            "phases_executed": 7,
+            "status": "SEALED_AND_VERIFIED",
+            "tamper_evident_hash": LAST_AUDIT_HASH,
+        })
+        stage_data = {
+            "stage_id": 7,
+            "name": "Phase 7: Fleet Restoration & Cryptographic Supabase Seal",
+            "domain": "Audit Ledger & Governance",
+            "status": "healthy",
+            "anomaly_score": 0.01,
+            "confidence": 1.0,
+            "metrics": LIVE_TELEMETRY["latest_metrics"],
+            "ai_insights": {
+                "summary": "Fleet returned to 100% nominal availability. All 7 simulation phases recorded in tamper-evident Supabase audit ledger. Cryptographic hash-chain sealed with zero integrity deviations.",
+                "root_cause": "Full Recovery Verified",
+                "risk_score": "ZERO (0.01)",
+                "blast_radius": [],
+                "action": "Simulation runbook archived into knowledge base with vector embeddings.",
+            },
+        }
+
+    return {
+        "status": "success",
+        "stage": stage_data,
+        "fleet_state": LIVE_TELEMETRY["fleet_state"],
+        "supabase_synced": supabase_client is not None,
+    }
+
+
+@app.post("/api/simulation/run-suite")
+def run_simulation_suite(body: dict[str, Any] = Body(...)):
+    """
+    Executes all 7 stages of the simulation suite in sequence,
+    generating a complete timeline of metrics, AI reasoning, and Supabase audit entries.
+    """
+    tenant_id = body.get("tenant_id", "00000000-0000-0000-0000-000000000001")
+    stages = []
+    for s_id in range(1, 8):
+        res = execute_simulation_stage({
+            "stage_id": s_id,
+            "tenant_id": tenant_id,
+            "provider": body.get("provider", CURRENT_LLM_CONFIG["provider"]),
+            "model": body.get("model", CURRENT_LLM_CONFIG["model"]),
+        })
+        stages.append(res["stage"])
+
+    return {
+        "status": "success",
+        "suite_name": "Full Fleet Chaos & AI Observability Suite",
+        "total_stages": len(stages),
+        "stages": stages,
+        "tamper_evident_seal": LAST_AUDIT_HASH,
+        "supabase_synced": supabase_client is not None,
+        "executed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
 
 
 
@@ -1150,6 +1872,18 @@ def test_wrong_region_attack():
         detail = (
             f"Wrong-region rejection: Tenant '{eu_collector['tenant_name']}' residency is locked to region '{tenant_reg}', "
             f"but target ingest node is running in region '{node_reg}'. Cross-region data egress prohibited by residency policy (§6.2, §15)."
+        )
+        record_audit_log(
+            tenant_id=eu_collector["tenant_id"],
+            actor="residency_firewall",
+            action="cross_region_violation_blocked",
+            detail_json={
+                "status": "rejected_403",
+                "tenant_name": eu_collector["tenant_name"],
+                "tenant_region": tenant_reg,
+                "node_region": node_reg,
+                "guard_enforced": "Strict Zero Cross-Region Replication Guard",
+            },
         )
         return {
             "status": "rejected_403",

@@ -149,6 +149,7 @@ export default function LoginPage() {
         const authData = await res.json();
         setAuthSuccess(true);
         if (typeof window !== "undefined") {
+          localStorage.setItem("aiops_is_authenticated", "true");
           localStorage.setItem(
             "aiops_current_tenant",
             JSON.stringify({
@@ -157,6 +158,7 @@ export default function LoginPage() {
               region: authData.region,
               collector_id: authData.collector_id,
               token: authData.token,
+              is_authenticated: true,
             })
           );
         }
@@ -170,6 +172,7 @@ export default function LoginPage() {
     } catch {
       // Local fallback
       if (typeof window !== "undefined") {
+        localStorage.setItem("aiops_is_authenticated", "true");
         localStorage.setItem(
           "aiops_current_tenant",
           JSON.stringify({
@@ -178,6 +181,7 @@ export default function LoginPage() {
             region: selectedTenant.region,
             collector_id: "col-local-01",
             token: `demo_token_${selectedTenant.id.slice(0, 8)}`,
+            is_authenticated: true,
           })
         );
       }
@@ -609,7 +613,23 @@ export default function LoginPage() {
 
                   <button
                     type="button"
-                    onClick={() => router.push(`/dashboard?tenant_id=${regSuccessData.tenant_id}`)}
+                    onClick={() => {
+                      if (typeof window !== "undefined") {
+                        localStorage.setItem("aiops_is_authenticated", "true");
+                        localStorage.setItem(
+                          "aiops_current_tenant",
+                          JSON.stringify({
+                            tenant_id: regSuccessData.tenant_id,
+                            tenant_name: regSuccessData.tenant_name,
+                            region: regSuccessData.region,
+                            collector_id: regSuccessData.collector_id,
+                            token: `reg_token_${regSuccessData.tenant_id.slice(0, 8)}`,
+                            is_authenticated: true,
+                          })
+                        );
+                      }
+                      router.push(`/dashboard?tenant_id=${regSuccessData.tenant_id}`);
+                    }}
                     className="w-full py-3 rounded-full bg-[#C8F63B] text-[#07090C] text-xs font-bold tracking-tight flex items-center justify-center gap-2 hover:bg-[#d8ff54] transition-all shadow-[0_0_20px_rgba(200,246,59,0.25)] hover:scale-[1.02] active:scale-95"
                   >
                     <span>Enter Observability Console</span>

@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Activity,
   Wifi,
@@ -17,6 +17,9 @@ import {
   CheckCircle2,
   LogIn,
   UserPlus,
+  ShieldCheck,
+  LogOut,
+  FlaskConical,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
 
@@ -34,12 +37,15 @@ export default function AppSidebar({
   onCloseMobile,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const {
     currentTenant,
     availableTenants,
     handleSwitchTenant,
     fleetState,
     secondsAgo,
+    isAuthenticated,
+    logout,
   } = useTenant();
 
   const navigationSections = [
@@ -63,6 +69,14 @@ export default function AppSidebar({
               : fleetState === "degraded"
               ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
               : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
+        },
+        {
+          label: "Simulation Lab",
+          sublabel: "End-to-End Fleet Chaos & AI",
+          href: "/dashboard/simulator",
+          icon: FlaskConical,
+          badge: "E2E AI",
+          badgeColor: "bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-400 border border-amber-500/30",
         },
         {
           label: "Network Studio",
@@ -97,32 +111,51 @@ export default function AppSidebar({
     },
     {
       title: "ACCESS & PORTALS",
-      items: [
-        {
-          label: "Sign In",
-          sublabel: "Access Tenant Organization",
-          href: "/login?tab=signin",
-          icon: LogIn,
-          badge: "AUTH",
-          badgeColor: "bg-blue-500/15 text-blue-400 border border-blue-500/25",
-        },
-        {
-          label: "Create Account",
-          sublabel: "Enroll New Isolated Org",
-          href: "/login?tab=create",
-          icon: UserPlus,
-          badge: "NEW ORG",
-          badgeColor: "bg-[#C8F63B]/15 text-[#C8F63B] border border-[#C8F63B]/25",
-        },
-        {
-          label: "Ascend 3D Earth",
-          sublabel: "Interactive WebGL Globe",
-          href: "/",
-          icon: Layers,
-          badge: "3D",
-          badgeColor: "bg-purple-500/15 text-purple-400 border border-purple-500/25",
-        },
-      ],
+      items: isAuthenticated
+        ? [
+            {
+              label: "Active Session",
+              sublabel: currentTenant.tenant_name || currentTenant.name || "Authenticated Tenant",
+              href: "/dashboard",
+              icon: ShieldCheck,
+              badge: "ACTIVE",
+              badgeColor: "bg-emerald-500/15 text-emerald-400 border border-emerald-500/25",
+            },
+            {
+              label: "Ascend 3D Earth",
+              sublabel: "Interactive WebGL Globe",
+              href: "/",
+              icon: Layers,
+              badge: "3D",
+              badgeColor: "bg-purple-500/15 text-purple-400 border border-purple-500/25",
+            },
+          ]
+        : [
+            {
+              label: "Sign In",
+              sublabel: "Access Tenant Organization",
+              href: "/login?tab=signin",
+              icon: LogIn,
+              badge: "AUTH",
+              badgeColor: "bg-blue-500/15 text-blue-400 border border-blue-500/25",
+            },
+            {
+              label: "Create Account",
+              sublabel: "Enroll New Isolated Org",
+              href: "/login?tab=create",
+              icon: UserPlus,
+              badge: "NEW ORG",
+              badgeColor: "bg-[#C8F63B]/15 text-[#C8F63B] border border-[#C8F63B]/25",
+            },
+            {
+              label: "Ascend 3D Earth",
+              sublabel: "Interactive WebGL Globe",
+              href: "/",
+              icon: Layers,
+              badge: "3D",
+              badgeColor: "bg-purple-500/15 text-purple-400 border border-purple-500/25",
+            },
+          ],
     },
   ];
 
@@ -302,26 +335,51 @@ export default function AppSidebar({
                 </div>
               </div>
 
-              {/* Quick links to Create Account or Sign In */}
+              {/* Session / Auth Quick Action */}
               <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/5 text-[10px] font-mono-code">
-                <Link
-                  href="/login?tab=signin"
-                  onClick={onCloseMobile}
-                  className="text-[#9AA4B2] hover:text-white flex items-center gap-1 transition-colors cursor-pointer pointer-events-auto"
-                  title="Sign In to another organization"
-                >
-                  <LogIn className="w-2.5 h-2.5 text-[#3B82F6]" />
-                  <span>Sign In</span>
-                </Link>
-                <Link
-                  href="/login?tab=create"
-                  onClick={onCloseMobile}
-                  className="text-[#C8F63B] hover:underline flex items-center gap-1 transition-colors font-semibold cursor-pointer pointer-events-auto"
-                  title="Enroll a new enterprise tenant"
-                >
-                  <UserPlus className="w-2.5 h-2.5" />
-                  <span>+ Enroll Tenant</span>
-                </Link>
+                {isAuthenticated ? (
+                  <>
+                    <div className="flex items-center gap-1.5 text-emerald-400 min-w-0">
+                      <ShieldCheck className="w-3 h-3 text-[#C8F63B] shrink-0" />
+                      <span className="truncate max-w-[100px] text-zinc-300">
+                        {currentTenant.name || currentTenant.tenant_name}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => {
+                        logout();
+                        onCloseMobile();
+                        router.push("/login?tab=signin");
+                      }}
+                      className="text-red-400/80 hover:text-red-400 hover:underline flex items-center gap-1 transition-colors cursor-pointer pointer-events-auto"
+                      title="Sign Out"
+                    >
+                      <LogOut className="w-2.5 h-2.5" />
+                      <span>Sign Out</span>
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Link
+                      href="/login?tab=signin"
+                      onClick={onCloseMobile}
+                      className="text-[#9AA4B2] hover:text-white flex items-center gap-1 transition-colors cursor-pointer pointer-events-auto"
+                      title="Sign In to another organization"
+                    >
+                      <LogIn className="w-2.5 h-2.5 text-[#3B82F6]" />
+                      <span>Sign In</span>
+                    </Link>
+                    <Link
+                      href="/login?tab=create"
+                      onClick={onCloseMobile}
+                      className="text-[#C8F63B] hover:underline flex items-center gap-1 transition-colors font-semibold cursor-pointer pointer-events-auto"
+                      title="Enroll a new enterprise tenant"
+                    >
+                      <UserPlus className="w-2.5 h-2.5" />
+                      <span>+ Enroll Tenant</span>
+                    </Link>
+                  </>
+                )}
               </div>
             </div>
 
@@ -351,20 +409,35 @@ export default function AppSidebar({
         ) : (
           /* Collapsed Footnote Icons */
           <div className="flex flex-col items-center gap-2.5 py-1">
-            <Link
-              href="/login?tab=signin"
-              className="p-2 rounded-lg text-[#9AA4B2] hover:text-white hover:bg-white/5 transition-colors cursor-pointer pointer-events-auto"
-              title="Sign In to Tenant"
-            >
-              <LogIn className="w-4 h-4 text-[#3B82F6]" />
-            </Link>
-            <Link
-              href="/login?tab=create"
-              className="p-2 rounded-lg text-[#C8F63B] hover:bg-white/5 transition-colors cursor-pointer pointer-events-auto"
-              title="Create Account / Enroll Tenant"
-            >
-              <UserPlus className="w-4 h-4" />
-            </Link>
+            {isAuthenticated ? (
+              <button
+                onClick={() => {
+                  logout();
+                  router.push("/login?tab=signin");
+                }}
+                className="p-2 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer pointer-events-auto"
+                title="Sign Out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            ) : (
+              <>
+                <Link
+                  href="/login?tab=signin"
+                  className="p-2 rounded-lg text-[#9AA4B2] hover:text-white hover:bg-white/5 transition-colors cursor-pointer pointer-events-auto"
+                  title="Sign In to Tenant"
+                >
+                  <LogIn className="w-4 h-4 text-[#3B82F6]" />
+                </Link>
+                <Link
+                  href="/login?tab=create"
+                  className="p-2 rounded-lg text-[#C8F63B] hover:bg-white/5 transition-colors cursor-pointer pointer-events-auto"
+                  title="Create Account / Enroll Tenant"
+                >
+                  <UserPlus className="w-4 h-4" />
+                </Link>
+              </>
+            )}
             <div className="w-4 border-t border-white/10 my-0.5" />
             <span
               className={`w-2.5 h-2.5 rounded-full ${
