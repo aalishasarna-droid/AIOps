@@ -18,6 +18,8 @@ import {
   UserPlus,
   ShieldCheck,
   LogOut,
+  HeartPulse,
+  FlaskConical,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
 import { useAudioAlerts } from "@/context/AudioAlertContext";
@@ -68,6 +70,22 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
           subtitle: "Canonical Cryptographic Egress Trail",
           icon: Shield,
           iconColor: "text-[#C8F63B]",
+        };
+      case "/dashboard/health":
+        return {
+          section: "Observability",
+          title: "System Health Diagnostics",
+          subtitle: "Enterprise Health States · Excellent · Good · Fair · Poor",
+          icon: HeartPulse,
+          iconColor: "text-emerald-400",
+        };
+      case "/dashboard/simulator":
+        return {
+          section: "Observability",
+          title: "Simulation Lab",
+          subtitle: "End-to-End Fleet Chaos & AI Remediation",
+          icon: FlaskConical,
+          iconColor: "text-amber-400",
         };
       case "/dashboard":
       default:

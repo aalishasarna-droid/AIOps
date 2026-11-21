@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   LogOut,
   FlaskConical,
+  HeartPulse,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
 import ThemeToggle from "@/components/ThemeToggle";
@@ -67,6 +68,24 @@ export default function AppSidebar({
           badgeColor:
             fleetState === "critical"
               ? "bg-red-500/20 text-red-400 border border-red-500/30"
+              : fleetState === "degraded"
+              ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+              : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
+        },
+        {
+          label: "Health Diagnostics",
+          sublabel: "Excellent · Good · Fair · Poor",
+          href: "/dashboard/health",
+          icon: HeartPulse,
+          badge:
+            fleetState === "critical"
+              ? "POOR"
+              : fleetState === "degraded"
+              ? "FAIR"
+              : "EXCELLENT",
+          badgeColor:
+            fleetState === "critical"
+              ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
               : fleetState === "degraded"
               ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
               : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",

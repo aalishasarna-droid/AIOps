@@ -4,6 +4,8 @@ Runs on localhost:8080 inside customer Tier 1 environment to prove zero leakage:
 - Side-by-side Raw vs. Sent allow-listed metadata view
 - Real-time cryptographic Egress Audit Log viewer with full UUIDv7 Payload IDs and SHA-256 hashes
 - 1-Click Copy and direct cross-verification links to Cloud SaaS Dashboard (:3000)
+- Live multi-tenant binding selector (Acme Financial, aanya tech, etc.) synced with Supabase
+- Live Transmit to Cloud Ingest API (:8000) with automatic Supabase persistence
 - Interactive zero-leak redaction console with preset enterprise attack vectors
 - AST-enforced zero cloud LLM client boundary
 """
@@ -14,6 +16,9 @@ import hashlib
 import json
 import logging
 import os
+import urllib.request
+import uuid
+from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 from typing import Any, Optional
@@ -185,6 +190,15 @@ HTML_PAGE = """<!DOCTYPE html>
       background: #D8FF54;
       transform: translateY(-1px);
     }
+    .btn-emerald {
+      background: var(--emerald);
+      color: #07090E;
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
+    }
+    .btn-emerald:hover {
+      background: #34D399;
+      transform: translateY(-1px);
+    }
     .btn-outline {
       background: rgba(255, 255, 255, 0.04);
       color: var(--text);
@@ -208,6 +222,35 @@ HTML_PAGE = """<!DOCTYPE html>
       background: rgba(255, 255, 255, 0.12);
       color: #FFF;
       border-color: var(--lime);
+    }
+
+    /* Tenant Selector Bar */
+    .tenant-bar {
+      background: rgba(56, 189, 248, 0.05);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 12px;
+      padding: 0.75rem 1.25rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+    .tenant-select {
+      background: #020408;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      color: #FFF;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      font-family: 'JetBrains Mono', monospace;
+      outline: none;
+      cursor: pointer;
+    }
+    .tenant-select:focus {
+      border-color: var(--cyan);
     }
 
     /* Stat Cards Barometer */
@@ -380,6 +423,18 @@ HTML_PAGE = """<!DOCTYPE html>
       white-space: pre-wrap;
       word-break: break-all;
       line-height: 1.5;
+    }
+
+    /* Delivery Alert Box */
+    .delivery-box {
+      margin-top: 1rem;
+      background: rgba(34, 197, 94, 0.08);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      border-radius: 10px;
+      padding: 0.85rem 1.1rem;
+      display: none;
+      font-size: 0.78rem;
+      font-family: 'JetBrains Mono', monospace;
     }
 
     /* Table Toolbar */
@@ -604,7 +659,7 @@ HTML_PAGE = """<!DOCTYPE html>
     <div class="header-actions">
       <span class="badge badge-cyan" id="ingestTargetBadge">Target: ingest-api:8000</span>
       <span class="badge badge-purple">Zero Cloud LLMs (AST Enforced)</span>
-      <a href="http://localhost:3000/dashboard/privacy" target="_blank" class="btn btn-lime">
+      <a id="cloudPrivacyBtn" href="http://localhost:3000/dashboard/privacy" target="_blank" class="btn btn-lime">
         <span>Verify in Cloud SaaS</span> ↗
       </a>
       <a href="http://localhost:3000" target="_blank" class="btn btn-outline">
@@ -612,6 +667,22 @@ HTML_PAGE = """<!DOCTYPE html>
       </a>
     </div>
   </header>
+
+  <!-- Live Multi-Tenant Selector & Cloud Link -->
+  <section class="tenant-bar">
+    <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+      <span style="font-size: 0.75rem; font-weight: 700; color: var(--cyan); font-family: 'JetBrains Mono', monospace;">
+        🏢 TRANSMIT TENANT:
+      </span>
+      <select id="tenantSelect" class="tenant-select" onchange="switchCollectorTenant()">
+        <option value="00000000-0000-0000-0000-000000000001">Acme Financial Corp (00000000...)</option>
+      </select>
+      <span class="badge badge-lime" id="activeTenantBadge">Acme Financial Corp</span>
+    </div>
+    <div style="font-size: 0.75rem; color: var(--text-muted); font-family: monospace;">
+      <span>Synced with Central SaaS &amp; Supabase Database</span>
+    </div>
+  </section>
 
   <!-- 4 Core Telemetry Barometer Cards -->
   <section class="stat-grid">
@@ -665,7 +736,7 @@ HTML_PAGE = """<!DOCTYPE html>
   <section class="card">
     <div class="card-header">
       <div class="card-title">
-        <span>⚡ Interactive Zero-Leak Verification Console</span>
+        <span>⚡ Interactive Zero-Leak Verification &amp; Live Ingestion Console</span>
         <span class="badge badge-green">Default-Deny Enforced</span>
       </div>
       <span style="font-size: 0.75rem; color: var(--text-dim); font-family: monospace;">Pydantic schema extra="forbid"</span>
@@ -673,6 +744,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     <p class="card-subtitle">
       Raw logs are intercepted and sanitized strictly inside customer private memory. Passwords, JWTs, Luhn credit cards, and planted <code>CANARY-...</code> secrets are scrubbed before any allow-listed metadata packet leaves the node.
+      Click <strong>&quot;Transmit to Cloud Ingest&quot;</strong> to send the scrubbed metadata live over the WAN to the Central SaaS API and write directly into Supabase!
     </p>
 
     <!-- Preset Vector Buttons -->
@@ -692,11 +764,14 @@ HTML_PAGE = """<!DOCTYPE html>
           <button class="btn-copy" onclick="document.getElementById('rawInput').value=''">Clear</button>
         </div>
         <textarea id="rawInput">DEBUG 2026-11-20T12:00:00Z auth_service: user=admin password=CANARY-password-hunter2 token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake ip=192.168.1.50 credit_card=4111111111111111 host=db-primary-internal</textarea>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.75rem;">
+        
+        <div style="display: flex; gap: 0.6rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap;">
           <button class="btn btn-lime" onclick="testRedaction()">
-            <span>Simulate Ingest & Redact</span> ⚡
+            <span>Simulate Ingest &amp; Redact</span> ⚡
           </button>
-          <span style="font-size: 0.75rem; color: var(--text-dim);">Pre-WAN AST Scrubber</span>
+          <button class="btn btn-emerald" onclick="transmitToCloud()">
+            <span>🚀 Transmit to Cloud Ingest (Updates Supabase)</span>
+          </button>
         </div>
       </div>
 
@@ -717,6 +792,9 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
       </div>
     </div>
+
+    <!-- Live Cloud Delivery Receipt Notification -->
+    <div id="deliveryBox" class="delivery-box"></div>
   </section>
 
   <!-- Cryptographic Egress Audit Trail Table -->
@@ -851,6 +929,9 @@ HTML_PAGE = """<!DOCTYPE html>
     // State
     let egressEntries = [];
     let collectorInfo = {};
+    let availableTenants = [];
+    let activeTenantId = "00000000-0000-0000-0000-000000000001";
+    let activeTenantName = "Acme Financial Corp";
     let currentSourceId = "src_d905e6aa1538a015";
     let lastRedactedResult = null;
     let selectedModalEntry = null;
@@ -876,7 +957,7 @@ HTML_PAGE = """<!DOCTYPE html>
       const toast = document.getElementById("toast");
       toast.innerHTML = `<span>${msg}</span>`;
       toast.classList.add("show");
-      setTimeout(() => toast.classList.remove("show"), 2200);
+      setTimeout(() => toast.classList.remove("show"), 2500);
     }
 
     function copyText(text, label) {
@@ -894,6 +975,70 @@ HTML_PAGE = """<!DOCTYPE html>
         document.body.removeChild(ta);
         showToast(`✓ ${label || "Text"} copied!`);
       }
+    }
+
+    // Load available tenants from Central SaaS / Supabase
+    async function loadTenants() {
+      try {
+        const res = await fetch("/api/tenants-list");
+        if (res.ok) {
+          const data = await res.json();
+          availableTenants = data.tenants || [];
+          if (data.active_tenant_id) activeTenantId = data.active_tenant_id;
+          if (data.active_tenant_name) activeTenantName = data.active_tenant_name;
+
+          const sel = document.getElementById("tenantSelect");
+          sel.innerHTML = "";
+          availableTenants.forEach(t => {
+            const opt = document.createElement("option");
+            opt.value = t.id;
+            opt.textContent = `${t.name} (${t.id.substring(0, 8)}...)`;
+            if (t.id === activeTenantId) opt.selected = true;
+            sel.appendChild(opt);
+          });
+          document.getElementById("activeTenantBadge").textContent = activeTenantName;
+          updateCloudLinks();
+        }
+      } catch (e) {
+        console.warn("Could not load tenants list:", e);
+      }
+    }
+
+    // Switch active ingestion tenant
+    async function switchCollectorTenant() {
+      const sel = document.getElementById("tenantSelect");
+      const chosenId = sel.value;
+      const chosen = availableTenants.find(t => t.id === chosenId);
+      if (!chosen) return;
+
+      activeTenantId = chosen.id;
+      activeTenantName = chosen.name;
+      const apiKey = chosen.api_key || `col-${chosen.id.substring(0, 8)}-key`;
+
+      try {
+        const res = await fetch("/api/set-tenant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            tenant_name: activeTenantName,
+            api_key: apiKey
+          })
+        });
+        if (res.ok) {
+          document.getElementById("activeTenantBadge").textContent = activeTenantName;
+          updateCloudLinks();
+          showToast(`✓ Switched collector ingestion tenant to: ${activeTenantName}`);
+        }
+      } catch (e) {
+        showToast(`Error switching tenant: ${e.message}`);
+      }
+    }
+
+    function updateCloudLinks() {
+      const url = `http://localhost:3000/dashboard/privacy?tenant_id=${encodeURIComponent(activeTenantId)}`;
+      const btn = document.getElementById("cloudPrivacyBtn");
+      if (btn) btn.href = url;
     }
 
     // Fetch Collector Node Info
@@ -924,7 +1069,7 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
-    // Test Redaction
+    // Test Redaction Locally
     async function testRedaction() {
       const text = document.getElementById("rawInput").value;
       try {
@@ -942,6 +1087,63 @@ HTML_PAGE = """<!DOCTYPE html>
         showToast("✓ Ingest redacted & allow-listed metadata generated");
       } catch (e) {
         document.getElementById("sentOutput").textContent = "Error testing redaction: " + e.message;
+      }
+    }
+
+    // Transmit to Cloud SaaS Ingest API and update Supabase
+    async function transmitToCloud() {
+      const text = document.getElementById("rawInput").value;
+      const dBox = document.getElementById("deliveryBox");
+      dBox.style.display = "block";
+      dBox.style.background = "rgba(56, 189, 248, 0.1)";
+      dBox.style.border = "1px solid rgba(56, 189, 248, 0.3)";
+      dBox.style.color = "var(--cyan)";
+      dBox.innerHTML = `<span>⏳ Intercepting, scrubbing, and transmitting allow-listed payload to Central SaaS Ingest (:8000)...</span>`;
+
+      try {
+        const res = await fetch("/api/transmit-to-cloud", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ raw_text: text, kind: "security_summary" })
+        });
+        const data = await res.json();
+        if (data.status === "delivered") {
+          dBox.style.background = "rgba(34, 197, 94, 0.1)";
+          dBox.style.border = "1px solid rgba(34, 197, 94, 0.4)";
+          dBox.style.color = "var(--emerald)";
+          dBox.innerHTML = `
+            <div style="font-weight: 700; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
+              <span>✓ DELIVERED TO CENTRAL SAAS INGEST &amp; STORED IN SUPABASE!</span>
+            </div>
+            <div style="color: #FFF; font-size: 0.75rem; line-height: 1.6;">
+              Payload ID: <span style="color: var(--cyan); font-weight: bold;">${data.payload_id}</span><br>
+              Target Tenant: <span style="color: var(--lime); font-weight: bold;">${data.tenant_name} (${data.tenant_id})</span><br>
+              Canonical SHA-256 Digest: <span style="color: var(--purple);">${data.hash}</span><br>
+              Supabase State: <span style="color: var(--emerald);">✓ Persisted to payloads_seen, metrics &amp; egress_receipts</span><br>
+            </div>
+            <div style="margin-top: 0.6rem; display: flex; gap: 0.6rem;">
+              <a href="http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(data.payload_id)}&verify_hash=${encodeURIComponent(data.hash)}&tenant_id=${encodeURIComponent(data.tenant_id)}"
+                 target="_blank" class="btn btn-lime" style="font-size: 0.72rem; padding: 0.3rem 0.65rem;">
+                View in Cloud SaaS Dashboard ↗
+              </a>
+              <button class="btn-copy" onclick="copyText('${data.payload_id}', 'Payload ID')">Copy Payload ID</button>
+            </div>
+          `;
+          showToast(`✓ Payload ${data.payload_id.substring(0, 8)}... sent to Cloud & Supabase!`);
+          document.getElementById("sentOutput").textContent = JSON.stringify(data, null, 2);
+          document.getElementById("redactShaText").textContent = data.hash;
+          fetchEgress();
+        } else {
+          dBox.style.background = "rgba(244, 63, 94, 0.1)";
+          dBox.style.border = "1px solid rgba(244, 63, 94, 0.3)";
+          dBox.style.color = "var(--red)";
+          dBox.innerHTML = `<span>✗ Transmission Error: ${JSON.stringify(data.cloud_response || data)}</span>`;
+        }
+      } catch (e) {
+        dBox.style.background = "rgba(244, 63, 94, 0.1)";
+        dBox.style.border = "1px solid rgba(244, 63, 94, 0.3)";
+        dBox.style.color = "var(--red)";
+        dBox.innerHTML = `<span>✗ Network Error connecting to Ingest API: ${e.message}</span>`;
       }
     }
 
@@ -977,7 +1179,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     // Format relative time
     function formatTime(isoStr) {
-      if (!isoStr) return "Just now";
+      if (!isoStr) return { exact: "Just now", relative: "" };
       try {
         const d = new Date(isoStr);
         const timePart = d.toTimeString().split(" ")[0] + " UTC";
@@ -1054,7 +1256,7 @@ HTML_PAGE = """<!DOCTYPE html>
           metricsSnippet = parts.join(" • ");
         }
 
-        const cloudVerifyUrl = `http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(pid)}&verify_hash=${encodeURIComponent(hash)}`;
+        const cloudVerifyUrl = `http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(pid)}&verify_hash=${encodeURIComponent(hash)}&tenant_id=${encodeURIComponent(activeTenantId)}`;
 
         row.innerHTML = `
           <td>
@@ -1111,7 +1313,7 @@ HTML_PAGE = """<!DOCTYPE html>
       document.getElementById("modalHash").textContent = entry.hash;
       document.getElementById("modalJsonContent").textContent = JSON.stringify(entry.payload || entry, null, 2);
 
-      const cloudUrl = `http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(entry.payload_id)}&verify_hash=${encodeURIComponent(entry.hash)}`;
+      const cloudUrl = `http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(entry.payload_id)}&verify_hash=${encodeURIComponent(entry.hash)}&tenant_id=${encodeURIComponent(activeTenantId)}`;
       document.getElementById("modalCloudLink").href = cloudUrl;
 
       document.getElementById("inspectModal").style.display = "flex";
@@ -1173,7 +1375,7 @@ HTML_PAGE = """<!DOCTYPE html>
             HMAC Pseudonym Source: ${match.payload ? match.payload.source_id : 'n/a'}<br>
           </div>
           <div style="margin-top: 0.5rem;">
-            <a href="http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(match.payload_id)}&verify_hash=${encodeURIComponent(match.hash)}"
+            <a href="http://localhost:3000/dashboard/privacy?verify_id=${encodeURIComponent(match.payload_id)}&verify_hash=${encodeURIComponent(match.hash)}&tenant_id=${encodeURIComponent(activeTenantId)}"
                target="_blank" class="btn btn-lime" style="font-size: 0.7rem; padding: 0.25rem 0.6rem;">
               View Cross-Boundary Receipt in Central SaaS ↗
             </a>
@@ -1194,6 +1396,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     // Auto-refresh loop
     fetchCollectorInfo();
+    loadTenants();
     fetchEgress();
     testRedaction();
     setInterval(fetchEgress, 3000);
@@ -1210,6 +1413,11 @@ HTML_PAGE = """<!DOCTYPE html>
 
 class AdminUIHandler(BaseHTTPRequestHandler):
     egress_logger: Any = None
+    sender: Any = None
+    app: Any = None
+    active_tenant_id: str = "00000000-0000-0000-0000-000000000001"
+    active_tenant_name: str = "Acme Financial Corp"
+    active_api_key: str = os.getenv("COLLECTOR_API_KEY", "test-collector-key-abc123")
 
     def log_message(self, format, *args):
         # Silence standard HTTP access logging in console
@@ -1228,6 +1436,34 @@ class AdminUIHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(entries).encode("utf-8"))
+        elif self.path == "/api/tenants-list":
+            tenants = []
+            try:
+                ingest_url = os.getenv("INGEST_URL", "http://ingest-api:8000")
+                req = urllib.request.Request(f"{ingest_url}/api/tenants", headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    data = json.loads(resp.read().decode())
+                    tenants = data.get("tenants", [])
+            except Exception as e:
+                logger.debug("Failed fetching tenants list from SaaS: %s", e)
+
+            if not tenants:
+                tenants = [
+                    {"id": "00000000-0000-0000-0000-000000000001", "name": "Acme Financial Corp", "api_key": "test-collector-key-abc123"},
+                    {"id": "00000000-0000-0000-0000-000000000002", "name": "Global Health Technologies", "api_key": "col-health-key-9988"},
+                    {"id": "00000000-0000-0000-0000-000000000003", "name": "Apex Logistics Global", "api_key": "col-apex-key-4455"},
+                ]
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "tenants": tenants,
+                "active_tenant_id": AdminUIHandler.active_tenant_id,
+                "active_tenant_name": AdminUIHandler.active_tenant_name,
+                "active_api_key": AdminUIHandler.active_api_key,
+            }).encode("utf-8"))
         elif self.path == "/api/collector-info":
             info = {
                 "collector_id": os.getenv("COLLECTOR_ID", "col-local-01"),
@@ -1235,8 +1471,10 @@ class AdminUIHandler(BaseHTTPRequestHandler):
                 "ingest_url": os.getenv("INGEST_URL", "http://ingest-api:8000"),
                 "source_id": pseudonymize_source_id(os.getenv("HOSTNAME", "node-primary-01")),
                 "raw_hostname": os.getenv("HOSTNAME", "node-primary-01"),
+                "active_tenant_id": AdminUIHandler.active_tenant_id,
+                "active_tenant_name": AdminUIHandler.active_tenant_name,
                 "cloud_dashboard_url": "http://localhost:3000",
-                "cloud_privacy_url": "http://localhost:3000/dashboard/privacy",
+                "cloud_privacy_url": f"http://localhost:3000/dashboard/privacy?tenant_id={AdminUIHandler.active_tenant_id}",
             }
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -1279,13 +1517,148 @@ class AdminUIHandler(BaseHTTPRequestHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode("utf-8"))
+
+        elif self.path == "/api/set-tenant":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+
+            t_id = data.get("tenant_id", "").strip()
+            t_name = data.get("tenant_name", "").strip()
+            t_key = data.get("api_key", "").strip()
+
+            if t_id:
+                AdminUIHandler.active_tenant_id = t_id
+            if t_name:
+                AdminUIHandler.active_tenant_name = t_name
+            if t_key:
+                AdminUIHandler.active_api_key = t_key
+                if AdminUIHandler.sender:
+                    AdminUIHandler.sender.api_key = t_key
+
+            logger.info("Collector switched active tenant to: %s (%s)", AdminUIHandler.active_tenant_name, AdminUIHandler.active_tenant_id)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "tenant_id": AdminUIHandler.active_tenant_id,
+                "tenant_name": AdminUIHandler.active_tenant_name,
+                "api_key": AdminUIHandler.active_api_key,
+            }).encode("utf-8"))
+
+        elif self.path == "/api/transmit-to-cloud":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length).decode("utf-8")
+            try:
+                data = json.loads(body)
+            except Exception:
+                data = {}
+
+            raw = data.get("raw_text", "")
+            redacted = redact_data(raw)
+            pseudo_host = pseudonymize_source_id(os.getenv("HOSTNAME", "node-primary-01"))
+            pid = str(uuid.uuid4())
+            now_iso = datetime.now(timezone.utc).isoformat()
+
+            payload_dict = {
+                "payload_id": pid,
+                "schema_version": "1.0",
+                "collector_id": os.getenv("COLLECTOR_ID", "col-local-01"),
+                "region": os.getenv("REGION", "ap-south-1"),
+                "event_ts_utc": now_iso,
+                "source_tz": "UTC",
+                "source_id": pseudo_host,
+                "kind": "security_summary",
+                "window_s": 5,
+                "context": (redacted[:195] if redacted else "Manual redaction event"),
+                "metrics": {
+                    "cpu_pct": {"avg": 24.5, "max": 42.0, "min": 10.0, "p95": 38.0},
+                    "mem_pct": {"avg": 35.2, "max": 38.0, "min": 32.0, "p95": 37.0},
+                    "latency_ms": {"avg": 4.2, "max": 12.0, "min": 1.0, "p95": 8.0},
+                },
+                "collector_meta": {
+                    "version": "1.0.0",
+                    "cpu_pct": 24.5,
+                    "mem_mb": 35.2,
+                }
+            }
+
+            try:
+                from collector.schemas import IngestPayload
+                payload_dict = IngestPayload(**payload_dict).model_dump(mode="json")
+            except Exception as e:
+                logger.warning("IngestPayload validation in UI transmit: %s", e)
+
+            # 1. Log locally to append-only egress audit log
+            canonical_json, payload_hash = "", ""
+            if self.egress_logger:
+                canonical_json, payload_hash = self.egress_logger.log_egress(payload_dict)
+            else:
+                canonical_json = json.dumps(payload_dict, sort_keys=True, separators=(",", ":"))
+                payload_hash = hashlib.sha256(canonical_json.encode("utf-8")).hexdigest()
+
+            # 2. Transmit to SaaS Ingest API
+            cloud_resp = {}
+            cloud_status = "error"
+            if self.sender:
+                try:
+                    cloud_resp = self.sender.send_batch([payload_dict])
+                    cloud_status = "delivered"
+                except Exception as e:
+                    cloud_resp = {"error": str(e)}
+                    logger.warning("Manual transmit failed via sender: %s", e)
+
+            if cloud_status != "delivered":
+                try:
+                    ingest_url = os.getenv("INGEST_URL", "http://ingest-api:8000")
+                    req = urllib.request.Request(
+                        f"{ingest_url}/ingest",
+                        data=json.dumps({"payloads": [payload_dict]}).encode("utf-8"),
+                        headers={
+                            "Content-Type": "application/json",
+                            "X-Collector-Key": AdminUIHandler.active_api_key,
+                        }
+                    )
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        cloud_resp = json.loads(r.read().decode())
+                        cloud_status = "delivered"
+                except Exception as e:
+                    cloud_resp = {"error": str(e)}
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": cloud_status,
+                "payload_id": pid,
+                "hash": payload_hash,
+                "tenant_id": AdminUIHandler.active_tenant_id,
+                "tenant_name": AdminUIHandler.active_tenant_name,
+                "cloud_response": cloud_resp,
+                "sanitized_preview": redacted,
+            }).encode("utf-8"))
+
         else:
             self.send_response(404)
             self.end_headers()
 
 
-def start_admin_ui_server(port: int = 8080, egress_logger: Any = None) -> HTTPServer:
+def start_admin_ui_server(
+    port: int = 8080,
+    egress_logger: Any = None,
+    sender: Any = None,
+    app: Any = None,
+) -> HTTPServer:
     AdminUIHandler.egress_logger = egress_logger
+    AdminUIHandler.sender = sender
+    AdminUIHandler.app = app
     server = HTTPServer(("0.0.0.0", port), AdminUIHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()

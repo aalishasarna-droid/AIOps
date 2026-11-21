@@ -35,7 +35,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="min-h-full bg-[#07090C] text-white antialiased flex flex-col selection:bg-[#C8F63B] selection:text-[#07090C] transition-colors duration-200">
+      <body className="min-h-full bg-[var(--bg)] text-[var(--text)] antialiased flex flex-col selection:bg-[#C8F63B] selection:text-[#07090C] transition-colors duration-200">
         <ThemeProvider>
           <AudioAlertProvider>
             {children}

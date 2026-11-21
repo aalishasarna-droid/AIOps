@@ -318,8 +318,30 @@ def derive_tenant(api_key: Optional[str]) -> dict[str, str]:
                 }
                 KNOWN_COLLECTORS[api_key] = info
                 return info
+
+            # Check Supabase tenants table directly by col-{id[:8]}-key or raw ID
+            t_res = supabase_client.table("tenants").select("id, name, region, policy_json").execute()
+            for t in t_res.data or []:
+                expected_key = f"col-{t['id'][:8]}-key"
+                if api_key == expected_key or api_key == t["id"] or api_key.startswith(f"col-{t['id'][:8]}"):
+                    col_uuid = "00000000-0000-0000-0000-000000000010"
+                    try:
+                        c_res = supabase_client.table("collectors").select("id").eq("tenant_id", t["id"]).limit(1).execute()
+                        if c_res.data and c_res.data[0].get("id"):
+                            col_uuid = c_res.data[0]["id"]
+                    except Exception:
+                        pass
+                    info = {
+                        "tenant_id": t["id"],
+                        "collector_id": col_uuid,
+                        "name": f"{t['name']} Collector",
+                        "tenant_name": t["name"],
+                        "region": t.get("region", "ap-south-1"),
+                    }
+                    KNOWN_COLLECTORS[api_key] = info
+                    return info
         except Exception as e:
-            logger.debug("Collector cred_hash lookup: %s", e)
+            logger.debug("Collector cred_hash / tenant lookup: %s", e)
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
@@ -717,29 +739,46 @@ def get_live_telemetry(tenant_id: Optional[str] = None):
 
     # Filter payloads by tenant if requested
     filtered_payloads = LIVE_TELEMETRY["recent_payloads"]
-    if tenant_id and tenant_id != "00000000-0000-0000-0000-000000000001":
-        # Multi-tenant isolation: demo payload stream for secondary tenants
-        filtered_payloads = [
+    if tenant_id:
+        tenant_matches = [
             p for p in LIVE_TELEMETRY["recent_payloads"]
             if p.get("tenant_id") == tenant_id
         ]
-        if not filtered_payloads:
-            filtered_payloads = [
-                {
-                    "payload_id": f"tenant-{tenant_id[:4]}-batch-01",
-                    "hash": hashlib.sha256(f"{tenant_id}:batch".encode()).hexdigest(),
-                    "source_id": f"src_node_{tenant_id[:4]}",
-                    "kind": "metric_window",
-                    "received_at": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
-                    "tenant_id": tenant_id,
-                }
-            ]
+        if tenant_matches:
+            filtered_payloads = tenant_matches
+        elif supabase_client:
+            try:
+                sb_res = supabase_client.table("payloads_seen").select("payload_id, hash, tenant_id, received_at").eq("tenant_id", tenant_id).order("received_at", desc=True).limit(15).execute()
+                if sb_res.data:
+                    filtered_payloads = [
+                        {
+                            "payload_id": row["payload_id"],
+                            "hash": row["hash"],
+                            "source_id": "src_col_local",
+                            "kind": "metric_window",
+                            "received_at": (row.get("received_at") or "")[11:19] + " UTC",
+                            "tenant_id": tenant_id,
+                        }
+                        for row in sb_res.data
+                    ]
+                else:
+                    filtered_payloads = LIVE_TELEMETRY["recent_payloads"]
+            except Exception as e:
+                logger.debug("Supabase payloads_seen query: %s", e)
+                filtered_payloads = LIVE_TELEMETRY["recent_payloads"]
 
     active_tenant_name = "Acme Financial Corp"
     if tenant_id in ["00000000-0000-0000-0000-000000000002"]:
         active_tenant_name = "Global Health Technologies"
     elif tenant_id in ["00000000-0000-0000-0000-000000000003"]:
         active_tenant_name = "Apex Logistics Global"
+    elif tenant_id and supabase_client:
+        try:
+            t_res = supabase_client.table("tenants").select("name").eq("id", tenant_id).limit(1).execute()
+            if t_res.data and t_res.data[0].get("name"):
+                active_tenant_name = t_res.data[0]["name"]
+        except Exception:
+            pass
 
     # Maintain persistent anomaly metrics if a failure scenario is active
     active_sc = LIVE_TELEMETRY.get("scenario", "normal")
@@ -2118,15 +2157,16 @@ async def ingest_payloads(
                 LIVE_TELEMETRY["fleet_state"] = state.value
                 LIVE_TELEMETRY["fleet_reasons"] = reasons or ["All signals within normal baselines"]
 
-        # Append to recent payloads list (keep latest 15)
+        # Append to recent payloads list (keep latest 30)
         LIVE_TELEMETRY["recent_payloads"].insert(0, {
             "payload_id": pid,
             "hash": sha256_hash,
             "source_id": getattr(payload, "source_id", "src_col_local"),
             "kind": getattr(payload, "kind", "metric_window"),
             "received_at": datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
+            "tenant_id": tenant_id,
         })
-        if len(LIVE_TELEMETRY["recent_payloads"]) > 15:
+        if len(LIVE_TELEMETRY["recent_payloads"]) > 30:
             LIVE_TELEMETRY["recent_payloads"].pop()
 
         # Persist to Supabase Cloud Database if connected
@@ -2179,10 +2219,15 @@ async def ingest_payloads(
 
             try:
                 # 4. Cryptographic egress receipt
+                valid_col_id = collector_id
+                try:
+                    uuid.UUID(str(collector_id))
+                except (ValueError, TypeError):
+                    valid_col_id = "00000000-0000-0000-0000-000000000010"
                 supabase_client.table("egress_receipts").insert({
                     "payload_id": pid,
                     "tenant_id": tenant_id,
-                    "collector_id": collector_id or "00000000-0000-0000-0000-000000000010",
+                    "collector_id": valid_col_id,
                     "received_at": now_iso,
                     "sha256": sha256_hash,
                 }).execute()

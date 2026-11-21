@@ -60,7 +60,7 @@ class CollectorApp:
         # Start admin UI (localhost only)
         ui_port = int(os.getenv("ADMIN_UI_PORT", "8080"))
         try:
-            start_admin_ui_server(port=ui_port, egress_logger=self.egress_logger)
+            start_admin_ui_server(port=ui_port, egress_logger=self.egress_logger, sender=self.sender, app=self)
         except Exception as e:
             logger.warning("Admin UI could not be started: %s", e)
 

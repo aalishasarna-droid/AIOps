@@ -436,6 +436,7 @@ export default function PrivacyTrustPage() {
               )}
             </tbody>
           </table>
+        </div>
       </section>
     </div>
   );

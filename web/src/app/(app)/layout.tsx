@@ -33,7 +33,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#07090C] text-white flex font-sans selection:bg-[#C8F63B] selection:text-[#07090C]">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)] flex font-sans selection:bg-[#C8F63B] selection:text-[#07090C]">
       {/* Permanent Sidebar Menu Bar */}
       <AppSidebar
         isCollapsed={isCollapsed}
