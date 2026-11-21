@@ -20,6 +20,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
+import { useAudioAlerts } from "@/context/AudioAlertContext";
 import ThemeToggle from "@/components/ThemeToggle";
 
 interface AppTopBarProps {
@@ -40,6 +41,7 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
     isAuthenticated,
     logout,
   } = useTenant();
+  const { audioEnabled, toggleAudioAlerts } = useAudioAlerts();
 
   const getBreadcrumbs = () => {
     switch (pathname) {
@@ -163,6 +165,33 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
           <div className="text-xs font-mono-code text-[#9AA4B2] bg-white/5 border border-white/10 px-2.5 py-1.5 rounded-lg hidden lg:block">
             {currentTime || "18:00:00 UTC"}
           </div>
+
+          {/* Audio Alerts: ON / OFF Toggle Button */}
+          <button
+            id="btn-audio-toggle"
+            onClick={toggleAudioAlerts}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold select-none cursor-pointer active:scale-95 transition-all duration-200 border ${
+              audioEnabled
+                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/35 hover:bg-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.18)]"
+                : "bg-white/5 text-[#9AA4B2] border-white/10 hover:bg-white/10 hover:text-white"
+            }`}
+            title={
+              audioEnabled
+                ? "Audio Alerts: ON (Web Audio Anomaly Chime Active — Click to Mute)"
+                : "Audio Alerts: OFF (Web Audio Anomaly Chime Muted — Click to Enable)"
+            }
+            aria-label="Toggle Audio Alerts"
+          >
+            <span className="text-sm leading-none">{audioEnabled ? "🔊" : "🔇"}</span>
+            <span className="hidden sm:inline">Audio Alerts:</span>
+            <span
+              className={`font-mono-code font-bold ${
+                audioEnabled ? "text-emerald-300" : "text-zinc-400"
+              }`}
+            >
+              {audioEnabled ? "ON" : "OFF"}
+            </span>
+          </button>
 
           {/* Theme Mode Toggle */}
           <ThemeToggle compact />

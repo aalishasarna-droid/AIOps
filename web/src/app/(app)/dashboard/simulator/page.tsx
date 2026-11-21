@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useTenant } from "@/context/TenantContext";
+import { useAudioAlerts } from "@/context/AudioAlertContext";
 
 interface SimulationStage {
   stage_id: number;
@@ -98,6 +99,7 @@ const STAGES_META = [
 
 export default function SimulatorPage() {
   const { currentTenant } = useTenant();
+  const { playAnomalyAlert } = useAudioAlerts();
 
   // Simulation execution state
   const [activeStageId, setActiveStageId] = useState<number>(1);
@@ -162,6 +164,10 @@ export default function SimulatorPage() {
         const stage = data.stage as SimulationStage;
         setActiveStageId(stageId);
         setCurrentStageData(stage);
+        // Play enterprise anomaly chime if stage is an incident/anomaly (Latency Jitter, Memory Leak, Cascading Mesh, or non-healthy)
+        if (stageId === 3 || stageId === 4 || stageId === 5 || stage.status === "critical" || stage.status === "degraded") {
+          playAnomalyAlert();
+        }
         setSimulationLog((prev) => [
           `[${new Date().toLocaleTimeString()}] Stage ${stageId} (${stage.name}): ${stage.status.toUpperCase()} -> Logged to Supabase`,
           ...prev.slice(0, 40),

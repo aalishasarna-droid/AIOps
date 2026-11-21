@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { ThemeProvider } from "@/context/ThemeContext";
+import { AudioAlertProvider } from "@/context/AudioAlertContext";
 
 export const metadata: Metadata = {
   title: "AIOps // Privacy-Preserving Observability & Autonomous Remediation",
@@ -36,7 +37,9 @@ export default function RootLayout({
       </head>
       <body className="min-h-full bg-[#07090C] text-white antialiased flex flex-col selection:bg-[#C8F63B] selection:text-[#07090C] transition-colors duration-200">
         <ThemeProvider>
-          {children}
+          <AudioAlertProvider>
+            {children}
+          </AudioAlertProvider>
         </ThemeProvider>
       </body>
     </html>

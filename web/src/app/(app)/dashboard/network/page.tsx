@@ -8,10 +8,12 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useTenant } from "@/context/TenantContext";
+import { useAudioAlerts } from "@/context/AudioAlertContext";
 import StackScanLoader from "@/components/StackScanLoader";
 
 export default function NetworkStudioPage() {
   const { currentTenant } = useTenant();
+  const { playAnomalyAlert } = useAudioAlerts();
 
   // Network Anomaly & Dev Console Tester State
   const [networkLog, setNetworkLog] = useState<string>(
@@ -65,6 +67,8 @@ export default function NetworkStudioPage() {
       { ts, level: "error", msg: preset.consoleMsg },
       ...prev.slice(0, 5),
     ]);
+    // Trigger audible enterprise anomaly alert chime if audio alerts are ON
+    playAnomalyAlert();
     handleAnalyzeNetworkError({
       error_type: preset.type,
       url: preset.url,
@@ -76,6 +80,7 @@ export default function NetworkStudioPage() {
   const handleSimulateBrowserNetworkFault = async (type: "504" | "502" | "403") => {
     setIsAnalyzingNetwork(true);
     setActivePresetId(type);
+    playAnomalyAlert();
     const ts = new Date().toTimeString().split(" ")[0] + "." + Math.floor(Math.random() * 900 + 100);
 
     try {
@@ -141,6 +146,10 @@ export default function NetworkStudioPage() {
       if (res.ok) {
         const data = await res.json();
         setNetworkAnalysisResult(data);
+        // Play alert chime when critical root cause anomaly is flagged by diagnostic pipeline
+        if (data.root_cause_analysis) {
+          playAnomalyAlert();
+        }
       }
     } catch (err) {
       console.error("Analyze network error API failure:", err);
@@ -247,6 +256,46 @@ export default function NetworkStudioPage() {
             Service mesh sidecar proxy logs, Envoy routing failures, and connection pool saturations.
           </p>
           <div className="flex flex-wrap gap-1.5">
+            <button
+              id="btn-simulate-db-crash"
+              onClick={() =>
+                handleLoadPreset({
+                  id: "db_crash",
+                  type: "DatabaseMemoryCrash",
+                  url: "postgres://db-primary.internal:5432/orders",
+                  status: 500,
+                  message: "FATAL: terminating connection due to out of memory for lock table (buffer pool exhausted 98.4%)",
+                  consoleMsg: "[PostgresCrash] 500 Internal Server Error: Database memory crash and connection pool exhaustion on db-primary",
+                })
+              }
+              className={`text-[10px] font-mono-code px-2 py-1 rounded border transition-colors ${
+                activePresetId === "db_crash"
+                  ? "bg-red-500 text-white border-red-400 font-bold"
+                  : "bg-white/5 hover:bg-white/10 text-white border-white/10"
+              }`}
+            >
+              Simulate DB Memory Crash
+            </button>
+            <button
+              id="btn-simulate-brute-force"
+              onClick={() =>
+                handleLoadPreset({
+                  id: "brute_force",
+                  type: "BruteForceRateLimit",
+                  url: "https://auth.internal:443/api/v1/auth/login",
+                  status: 429,
+                  message: "HTTP 429 Too Many Requests: Rate limit exceeded (4200 req/sec from suspicious ASN proxy botnet)",
+                  consoleMsg: "[SecurityAnomaly] 429 Too Many Requests: Distributed credential stuffing brute-force attack detected",
+                })
+              }
+              className={`text-[10px] font-mono-code px-2 py-1 rounded border transition-colors ${
+                activePresetId === "brute_force"
+                  ? "bg-red-500 text-white border-red-400 font-bold"
+                  : "bg-white/5 hover:bg-white/10 text-white border-white/10"
+              }`}
+            >
+              Simulate Brute-Force Login
+            </button>
             <button
               onClick={() =>
                 handleLoadPreset({

@@ -1,15 +1,16 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import StackScanLoader from "@/components/StackScanLoader";
 import {
   Shield, Activity, Server, Cpu, HardDrive, Wifi, AlertTriangle,
   CheckCircle2, ArrowRight, RotateCcw, Lock, ExternalLink, Terminal, Zap, RefreshCw, Loader2, Building2, Globe,
-  Sparkles, Brain, Check, Radio, Bug, Layers, ChevronRight
+  Sparkles, Brain, Check, Radio, Bug, Layers, ChevronRight, Database, UserX
 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { useTenant } from "@/context/TenantContext";
+import { useAudioAlerts } from "@/context/AudioAlertContext";
 
 interface TelemetryMetrics {
   cpu_pct?: number;
@@ -41,6 +42,8 @@ interface Incident {
 
 export default function DashboardPage() {
   const { currentTenant, fleetState, setFleetState, setSecondsAgo } = useTenant();
+  const { playAnomalyAlert } = useAudioAlerts();
+  const prevIncidentIdRef = useRef<string | null>(null);
 
   const [fleetReason, setFleetReason] = useState<string>("All systems nominal");
   const [metrics, setMetrics] = useState<TelemetryMetrics>({
@@ -123,6 +126,14 @@ export default function DashboardPage() {
         if (data.active_incident !== undefined) {
           if (data.active_incident !== null || data.scenario === "normal") {
             setActiveIncident(data.active_incident);
+            if (
+              data.active_incident &&
+              data.active_incident.state === "open" &&
+              data.active_incident.incident_id !== prevIncidentIdRef.current
+            ) {
+              prevIncidentIdRef.current = data.active_incident.incident_id;
+              playAnomalyAlert();
+            }
           }
         }
         if (data.narration !== undefined) {
@@ -170,6 +181,10 @@ export default function DashboardPage() {
     const scenarioTitles: Record<string, string> = {
       memory_leak: "Memory Leak Cascade (Worker-03 Pod OOM)",
       leak: "Memory Leak Cascade (Worker-03 Pod OOM)",
+      db_memory_crash: "DB Memory Crash & Connection Pool Exhaustion (Primary DB)",
+      db_crash: "DB Memory Crash & Connection Pool Exhaustion (Primary DB)",
+      brute_force_login: "Brute-Force Credential Stuffing & Rate-Limit Anomaly (429 Flood)",
+      brute_force: "Brute-Force Credential Stuffing & Rate-Limit Anomaly (429 Flood)",
       db_outage_cascade: "Cascading Network Partition (Ingress to Payment API)",
       partition: "Cascading Network Partition (Ingress to Payment API)",
       cpu_spike: "CPU Saturation & Thread Pool Exhaustion (Auth Node)",
@@ -178,6 +193,9 @@ export default function DashboardPage() {
     setActiveScenarioTitle(scenarioTitles[sc] || "Infrastructure Anomaly Scan");
     setIsAnalyzing(true);
     setRemediationApproved(false);
+
+    // Trigger enterprise audio alert chime (respects audioEnabled setting)
+    playAnomalyAlert();
 
     if (sc === "memory_leak" || sc === "leak") {
       setFleetState("critical");
@@ -200,6 +218,52 @@ export default function DashboardPage() {
           "Isolate and terminate worker-03 pod to prevent node-level kernel OOM panic: kubectl delete pod worker-03 --now",
           "Trigger automated container restart with pinned JVM/Node max-old-space-size limits",
           "Capture heap snapshot dump from storage volume for memory leak path analysis",
+        ],
+      });
+    } else if (sc === "db_memory_crash" || sc === "db_crash") {
+      setFleetState("critical");
+      setFleetReason("PostgreSQL Primary Memory Exhaustion & Buffer Pool Collapse (+4.9σ EWMA)");
+      setMetrics((m) => ({ ...m, mem_pct: 98.4, mem_used_mb: 7850, latency_ms: 1240.5 }));
+      setMemHistory([18.0, 38.5, 64.0, 85.2, 94.1, 98.4]);
+      setActiveIncident({
+        incident_id: "inc-db-crash-007",
+        severity: "critical",
+        state: "open",
+        anomaly_score: 0.99,
+        confidence: 0.98,
+        root_cause_candidate: "db-primary",
+        affected_services: ["db-primary", "payment-api", "billing-service"],
+      });
+      setNarration({
+        narration: "Catastrophic database memory crash and pool starvation on db-primary (+4.9σ EWMA). Exhausted shared_buffers and heavy unindexed sequential table scans.",
+        root_cause: { entity: "db-primary", confidence: 0.98 },
+        steps: [
+          "Terminate unindexed sequential scan connections: `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state != 'idle';`",
+          "Promote warm read-replica `db-replica-02` to redirect read queries immediately",
+          "Apply PgBouncer reserve pool allocation to restore customer transactions",
+        ],
+      });
+    } else if (sc === "brute_force_login" || sc === "brute_force") {
+      setFleetState("critical");
+      setFleetReason("Distributed Brute-Force Credential Attack & Auth Ingress Saturation (429 Flood)");
+      setMetrics((m) => ({ ...m, cpu_pct: 94.5, latency_ms: 320.0, packet_loss_pct: 5.2 }));
+      setCpuHistory([14.0, 38.2, 72.1, 89.0, 94.5]);
+      setActiveIncident({
+        incident_id: "inc-auth-brute-008",
+        severity: "critical",
+        state: "open",
+        anomaly_score: 0.97,
+        confidence: 0.96,
+        root_cause_candidate: "auth-gateway",
+        affected_services: ["auth-gateway", "session-store", "customer-portal"],
+      });
+      setNarration({
+        narration: "Distributed brute-force credential stuffing attack detected targeting /api/v1/auth/login. Over 4,200 failed auth attempts/sec bypassing basic rate limits.",
+        root_cause: { entity: "auth-gateway", confidence: 0.96 },
+        steps: [
+          "Enforce Cloudflare/Envoy IP reputation threshold and turn on automated CAPTCHA challenge",
+          "Temporarily lower account lockout threshold to 5 consecutive failed attempts per 15-minute window",
+          "Trigger automated IP-range ban for offending ASN botnets via eBPF XDP filter",
         ],
       });
     } else if (sc === "cpu_spike") {
@@ -472,6 +536,30 @@ export default function DashboardPage() {
             }`}
           >
             🌐 Network Latency
+          </button>
+          <button
+            id="btn-scenario-db-crash"
+            onClick={() => handleSetScenario("db_memory_crash")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
+              scenario === "db_memory_crash" || scenario === "db_crash"
+                ? "bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/60 font-bold shadow-[0_0_12px_rgba(239,68,68,0.35)]"
+                : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
+            }`}
+            title="Simulate DB Memory Crash and connection pool exhaustion"
+          >
+            🔴 DB Memory Crash
+          </button>
+          <button
+            id="btn-scenario-brute-force"
+            onClick={() => handleSetScenario("brute_force_login")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer select-none active:scale-95 transition-all duration-200 ${
+              scenario === "brute_force_login" || scenario === "brute_force"
+                ? "bg-[#EF4444]/25 text-[#EF4444] border border-[#EF4444]/60 font-bold shadow-[0_0_12px_rgba(239,68,68,0.35)]"
+                : "bg-white/5 hover:bg-white/10 text-white border border-white/10"
+            }`}
+            title="Simulate Brute-Force Login & Rate-Limit Anomaly"
+          >
+            🔴 Brute-Force Login
           </button>
         </div>
 
