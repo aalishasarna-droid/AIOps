@@ -95,6 +95,13 @@ payload = {'payload_id': str(uuid.uuid4()), 'schema_version': '1.0', 'collector_
 resp = httpx.post('http://localhost:8000/ingest', json={'payloads': [payload]}, headers={'X-Collector-Key': 'test-collector-key-abc123'}); \
 print('✅ Vision AI Application Ingested into AIOps Cloud! Status:', resp.status_code, 'Receipt:', resp.json()['receipts'][0])"
 
+send-edith-mcp: ## Transmit live telemetry from E.D.I.T.H MCP-IDE into AIOps Cloud
+	@docker compose exec -T ingest-api python -c "\
+import httpx, time, uuid; \
+payload = {'payload_id': str(uuid.uuid4()), 'schema_version': '1.0', 'collector_id': 'col-edith-mcp-ide-01', 'region': 'ap-south-1', 'event_ts_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'source_tz': 'UTC', 'source_id': 'h_edith_mcp_ide_server', 'kind': 'metric_window', 'window_s': 5, 'metrics': {'cpu_pct': {'avg': 22.8}, 'mem_pct': {'avg': 48.6}, 'latency_ms': {'avg': 6.8}, 'mcp_tools_active': {'avg': 12.0}}, 'category': 'developer_tooling', 'severity': 'info', 'context': 'E.D.I.T.H MCP-IDE active with 12 tool servers'}; \
+resp = httpx.post('http://localhost:8000/ingest', json={'payloads': [payload]}, headers={'X-Collector-Key': 'test-collector-key-abc123'}); \
+print('✅ E.D.I.T.H MCP-IDE Telemetry Ingested into AIOps Cloud! Status:', resp.status_code, 'Receipt:', resp.json()['receipts'][0])"
+
 # ──────────────────── Demo ──────────────────────────────────────────────
 
 .PHONY: demo demo-reset
