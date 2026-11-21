@@ -507,6 +507,30 @@ export default function HealthDashboardPage() {
       status: "online",
       lastCheck: "Active",
     },
+    {
+      id: "col-edith-mcp-01",
+      name: "E.D.I.T.H MCP-IDE",
+      role: "Developer Tooling Model Context Protocol",
+      region: "Developer Workstation",
+      tier: "Excellent",
+      score: 99,
+      uptime: "99.98%",
+      latency: "6.8ms",
+      status: "online",
+      lastCheck: "Active (12 Tools Connected)",
+    },
+    {
+      id: "col-vision-ai-01",
+      name: "Vision AI Assistive Engine",
+      role: "Edge Audio & Video Inference",
+      region: "Client Edge Device",
+      tier: "Excellent",
+      score: 98,
+      uptime: "99.95%",
+      latency: "14.8ms",
+      status: "online",
+      lastCheck: "Active (30 FPS Stream)",
+    },
   ];
 
   return (

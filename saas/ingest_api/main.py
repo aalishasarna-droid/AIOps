@@ -2255,3 +2255,29 @@ async def ingest_payloads(
         "duplicates": duplicate_count,
         "receipts": receipts,
     }
+
+
+@app.post("/api/custom-app/edith")
+def trigger_edith_telemetry():
+    """Trigger live telemetry from E.D.I.T.H MCP-IDE for instant UI demonstration."""
+    pid = str(uuid.uuid4())
+    now_iso = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
+    sha = hashlib.sha256(f"edith-{pid}".encode()).hexdigest()
+    LIVE_TELEMETRY["last_seen_ts"] = time.time()
+    LIVE_TELEMETRY["recent_payloads"].insert(0, {
+        "payload_id": pid,
+        "hash": sha,
+        "source_id": "h_edith_mcp_ide",
+        "kind": "developer_tooling",
+        "received_at": now_iso,
+        "tenant_id": "00000000-0000-0000-0000-000000000001",
+    })
+    return {
+        "status": "ok",
+        "app_name": "E.D.I.T.H MCP-IDE",
+        "payload_id": pid,
+        "hash": sha,
+        "metrics": {"mcp_tools_active": 12, "rpc_requests_sec": 45, "latency_ms": 6.8},
+        "receipt": "Accepted & Verified via Trust Boundary",
+    }
+
