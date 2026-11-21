@@ -81,6 +81,13 @@ inspect-db: ## Inspect the local collector SQLite database (raw store & outbox)
 shell-db: ## Open interactive SQLite shell in the collector database
 	docker compose exec -it collector python -m sqlite3 /app/data/collector.db
 
+send-custom-app: ## Transmit live telemetry from an external custom application into AIOps
+	@docker compose exec -T ingest-api python -c "\
+import httpx, time, uuid; \
+payload = {'payload_id': str(uuid.uuid4()), 'schema_version': '1.0', 'collector_id': 'col-custom-app-01', 'region': 'ap-south-1', 'event_ts_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'source_tz': 'UTC', 'source_id': 'h_custom_app_99', 'kind': 'metric_window', 'window_s': 5, 'metrics': {'cpu_pct': {'avg': 28.5}, 'latency_ms': {'avg': 9.2}}, 'category': 'nominal_operation', 'severity': 'info'}; \
+resp = httpx.post('http://localhost:8000/ingest', json={'payloads': [payload]}, headers={'X-Collector-Key': 'test-collector-key-abc123'}); \
+print('✅ Custom External App Ingestion Verified! Status:', resp.status_code, 'Receipt:', resp.json()['receipts'][0])"
+
 # ──────────────────── Demo ──────────────────────────────────────────────
 
 .PHONY: demo demo-reset
