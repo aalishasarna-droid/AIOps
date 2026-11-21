@@ -75,6 +75,12 @@ shell-ingest: ## Shell into the ingest-api container
 shell-simulator: ## Shell into the simulator container
 	docker compose exec simulator /bin/bash || docker compose run --rm simulator /bin/bash
 
+inspect-db: ## Inspect the local collector SQLite database (raw store & outbox)
+	docker compose exec collector python -m collector.inspect_db
+
+shell-db: ## Open interactive SQLite shell in the collector database
+	docker compose exec -it collector python -m sqlite3 /app/data/collector.db
+
 # ──────────────────── Demo ──────────────────────────────────────────────
 
 .PHONY: demo demo-reset
