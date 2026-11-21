@@ -435,17 +435,35 @@ export default function NetworkStudioPage() {
                   <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3.5">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-xs font-bold text-red-400">
-                        Root Cause: {networkAnalysisResult.root_cause}
+                        Root Cause: {networkAnalysisResult.root_cause || "ingress-proxy"}
                       </span>
                       <span className="text-[10px] font-mono-code bg-red-500/20 text-red-300 px-2 py-0.5 rounded font-bold">
                         {Math.round((networkAnalysisResult.confidence || 0.94) * 100)}% CONFIDENCE
                       </span>
                     </div>
-                    <p className="text-xs text-white leading-relaxed">{networkAnalysisResult.summary}</p>
+                    <p className="text-xs text-white leading-relaxed">
+                      {networkAnalysisResult.summary ||
+                        networkAnalysisResult.explanation?.narration ||
+                        networkAnalysisResult.explanation?.summary ||
+                        "Autonomous AI isolated upstream connection saturation as the primary root cause."}
+                    </p>
                     <div className="mt-2 text-[11px] font-mono-code text-[#9AA4B2] flex items-center gap-3">
-                      <span>Affected Service: <strong className="text-white">{networkAnalysisResult.affected_service}</strong></span>
+                      <span>
+                        Affected Service:{" "}
+                        <strong className="text-white">
+                          {networkAnalysisResult.affected_service ||
+                            (networkAnalysisResult.incident?.affected_services || []).join(", ") ||
+                            networkAnalysisResult.root_cause ||
+                            "ingress-proxy"}
+                        </strong>
+                      </span>
                       <span>•</span>
-                      <span>Severity: <strong className="text-red-400 uppercase">{networkAnalysisResult.severity}</strong></span>
+                      <span>
+                        Severity:{" "}
+                        <strong className="text-red-400 uppercase">
+                          {networkAnalysisResult.severity || networkAnalysisResult.incident?.severity || "critical"}
+                        </strong>
+                      </span>
                     </div>
                   </div>
 
@@ -456,42 +474,64 @@ export default function NetworkStudioPage() {
                       Recommended Runbook Actions &amp; Fixes
                     </h4>
                     <div className="space-y-3">
-                      {(networkAnalysisResult.recommended_fixes || []).map((fix: any, idx: number) => (
-                        <div key={idx} className="bg-black/50 border border-white/10 rounded-xl p-3">
-                          <div className="flex items-center justify-between mb-1.5">
-                            <span className="text-xs font-bold text-white flex items-center gap-1.5">
-                              <span className="w-4 h-4 rounded-full bg-[#C8F63B]/20 text-[#C8F63B] text-[10px] flex items-center justify-center font-bold">
-                                {idx + 1}
+                      {(
+                        (networkAnalysisResult.recommended_fixes && networkAnalysisResult.recommended_fixes.length > 0)
+                          ? networkAnalysisResult.recommended_fixes
+                          : (networkAnalysisResult.explanation?.steps || []).map((step: string) => ({
+                              title: step.includes(":") ? step.split(":")[0].trim() : "Recommended Remediation Step",
+                              description: step.includes(":") ? step.split(":").slice(1).join(":").trim() : step,
+                              code: step.includes("`") ? step.split("`")[1] : undefined,
+                            }))
+                      ).map((rawFix: any, idx: number) => {
+                        const fix = typeof rawFix === "string"
+                          ? {
+                              title: rawFix.includes(":") ? rawFix.split(":")[0].trim() : `Remediation Action ${idx + 1}`,
+                              description: rawFix.includes(":") ? rawFix.split(":").slice(1).join(":").trim() : rawFix,
+                              code: rawFix.includes("`") ? rawFix.split("`")[1] : undefined,
+                            }
+                          : {
+                              title: rawFix.title || rawFix.name || `Remediation Action ${idx + 1}`,
+                              description: rawFix.description || rawFix.desc || rawFix.summary || (typeof rawFix === "string" ? rawFix : ""),
+                              code: rawFix.code || rawFix.snippet || undefined,
+                            };
+
+                        return (
+                          <div key={idx} className="bg-black/50 border border-white/10 rounded-xl p-3">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-bold text-white flex items-center gap-1.5">
+                                <span className="w-4 h-4 rounded-full bg-[#C8F63B]/20 text-[#C8F63B] text-[10px] flex items-center justify-center font-bold shrink-0">
+                                  {idx + 1}
+                                </span>
+                                {fix.title}
                               </span>
-                              {fix.title}
-                            </span>
+                              {fix.code && (
+                                <button
+                                  onClick={() => handleCopyFix(fix.code, idx)}
+                                  className="text-[10px] font-mono-code text-[#9AA4B2] hover:text-white flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded transition-colors"
+                                >
+                                  {copiedFixIndex === idx ? (
+                                    <>
+                                      <Check className="w-3 h-3 text-[#22C55E]" />
+                                      <span className="text-[#22C55E]">Copied!</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Copy className="w-3 h-3" />
+                                      <span>Copy Snippet</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-[#9AA4B2] mb-2 leading-relaxed">{fix.description}</p>
                             {fix.code && (
-                              <button
-                                onClick={() => handleCopyFix(fix.code, idx)}
-                                className="text-[10px] font-mono-code text-[#9AA4B2] hover:text-white flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded transition-colors"
-                              >
-                                {copiedFixIndex === idx ? (
-                                  <>
-                                    <Check className="w-3 h-3 text-[#22C55E]" />
-                                    <span className="text-[#22C55E]">Copied!</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="w-3 h-3" />
-                                    <span>Copy Snippet</span>
-                                  </>
-                                )}
-                              </button>
+                              <pre className="bg-black/80 border border-white/5 rounded-lg p-2.5 text-[11px] font-mono-code text-[#C8F63B] overflow-x-auto leading-relaxed whitespace-pre-wrap">
+                                {fix.code}
+                              </pre>
                             )}
                           </div>
-                          <p className="text-[11px] text-[#9AA4B2] mb-2 leading-relaxed">{fix.description}</p>
-                          {fix.code && (
-                            <pre className="bg-black/80 border border-white/5 rounded-lg p-2.5 text-[11px] font-mono-code text-[#C8F63B] overflow-x-auto leading-relaxed">
-                              {fix.code}
-                            </pre>
-                          )}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 </div>

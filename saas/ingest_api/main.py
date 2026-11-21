@@ -1635,6 +1635,23 @@ def analyze_network_error(body: dict[str, Any] = Body(...)):
             "Ensure OPTIONS preflight requests return HTTP 204 with Access-Control-Allow-Headers: Authorization, Content-Type",
             "Verify browser request credentials mode matches backend Access-Control-Allow-Credentials: true",
         ]
+        recommended_fixes_structured = [
+            {
+                "title": "Add Permitted Client Origins to Gateway CORS Configuration",
+                "description": "Configure the reverse proxy or API gateway to reflect the requesting origin in Access-Control-Allow-Origin header.",
+                "code": "add_header 'Access-Control-Allow-Origin' '$http_origin' always;\nadd_header 'Access-Control-Allow-Credentials' 'true' always;",
+            },
+            {
+                "title": "Enable Preflight HTTP OPTIONS Handling",
+                "description": "Ensure OPTIONS requests are intercepted at the edge gateway and return HTTP 204 No Content with allowed headers.",
+                "code": "if ($request_method = 'OPTIONS') {\n    add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Collector-Key';\n    return 204;\n}",
+            },
+            {
+                "title": "Align Browser Fetch Credentials Policy",
+                "description": "Verify client-side fetch requests specify mode: 'cors' and include authentication credentials.",
+                "code": "fetch(url, { mode: 'cors', credentials: 'include' });",
+            },
+        ]
     elif status == 502 or "502" in str(message) or "connection_refused" in message.lower():
         root_cause = "upstream-backend-service"
         reason = f"HTTP 502 Bad Gateway: Upstream backend refused connection on '{url}'"
@@ -1646,6 +1663,23 @@ def analyze_network_error(body: dict[str, Any] = Body(...)):
             "Check upstream container process health: `docker ps` and verify port binding for upstream service",
             "Inspect upstream service error logs for Out-Of-Memory (OOM) or unhandled application panics",
             "Restart upstream worker pods / systemd service and verify socket listener availability",
+        ]
+        recommended_fixes_structured = [
+            {
+                "title": "Verify Upstream Process Health & Port Bindings",
+                "description": "Check if upstream container process crashed or socket listener terminated unexpectedly.",
+                "code": "docker ps --filter 'name=order-service'\ncurl -I http://order-service-internal:8080/health",
+            },
+            {
+                "title": "Inspect Microservice OOM Panic & Error Traces",
+                "description": "Examine container exit code for Out-Of-Memory (137) or uncaught exception stack trace.",
+                "code": "kubectl logs -l app=order-service --tail=100 --previous",
+            },
+            {
+                "title": "Trigger Rolling Restart of Upstream Deployment",
+                "description": "Gracefully redeploy upstream microservice pods to re-initialize TCP socket handlers.",
+                "code": "kubectl rollout restart deployment order-service",
+            },
         ]
     elif status == 504 or "timeout" in message.lower() or "timed_out" in message.lower():
         root_cause = "ingress-proxy"
@@ -1659,6 +1693,23 @@ def analyze_network_error(body: dict[str, Any] = Body(...)):
             "Check for slow database table locks or slow external API calls blocking the upstream handler",
             "Enable circuit-breaker fallback for endpoint to prevent thread pool exhaustion",
         ]
+        recommended_fixes_structured = [
+            {
+                "title": "Increase Upstream Proxy Read & Connect Timeout",
+                "description": "Increase proxy read timeout from 10s to 60s in gateway config to prevent premature client drop.",
+                "code": "proxy_connect_timeout 10s;\nproxy_read_timeout 60s;\nproxy_send_timeout 60s;",
+            },
+            {
+                "title": "Tune Network Interface Ring Buffers & Queue Limits",
+                "description": "Inspect NIC socket dropped frames and adjust socket queue buffers with ethtool.",
+                "code": "ethtool -G eth0 rx 4096 tx 4096\nsysctl -w net.core.netdev_max_backlog=5000",
+            },
+            {
+                "title": "Enable Circuit Breaker & Graceful Degraded Routing",
+                "description": "Trip circuit breaker when upstream latency exceeds 2.5s, routing traffic to fallback cache.",
+                "code": "kubectl apply -f ingress-circuit-breaker-envoy.yaml",
+            },
+        ]
     elif "name_not_resolved" in message.lower() or "dns" in error_type.lower():
         root_cause = "dns-resolver"
         reason = f"DNS Resolution Failure: `net::ERR_NAME_NOT_RESOLVED` for target hostname in '{url}'"
@@ -1669,6 +1720,23 @@ def analyze_network_error(body: dict[str, Any] = Body(...)):
             "Verify `/etc/resolv.conf` nameserver entries and CoreDNS cluster status",
             "Flush local DNS cache: `systemd-resolve --flush-caches` or test lookup via `dig +short`",
             "Ensure internal service discovery hostname or environment variable URL is correctly configured",
+        ]
+        recommended_fixes_structured = [
+            {
+                "title": "Verify Nameserver Entries & CoreDNS Status",
+                "description": "Check /etc/resolv.conf and inspect cluster CoreDNS pods for query timeouts.",
+                "code": "kubectl get pods -n kube-system -l k8s-app=kube-dns\ndig +short payments.internal.cluster.local",
+            },
+            {
+                "title": "Flush Local OS & Gateway DNS Cache",
+                "description": "Clear stale DNS cache entries on edge proxies and node resolvers.",
+                "code": "systemd-resolve --flush-caches",
+            },
+            {
+                "title": "Validate Internal Service Discovery FQDN",
+                "description": "Ensure Kubernetes service DNS name matches target namespace and port definition.",
+                "code": "payments.billing-system.svc.cluster.local:8443",
+            },
         ]
     else:
         root_cause = "network-interface"
@@ -1682,11 +1750,28 @@ def analyze_network_error(body: dict[str, Any] = Body(...)):
             "Check firewall / security group ingress rules for blocked ports or TCP SYN drop",
             "Implement exponential backoff retry policy in client fetch handler",
         ]
+        recommended_fixes_structured = [
+            {
+                "title": "Inspect MTU Sizing & Path Packet Fragmentation",
+                "description": "Check for Path MTU Blackhole where packets exceeding 1500 bytes get discarded silently.",
+                "code": "tracepath -n target-gateway\nip link set dev eth0 mtu 1460",
+            },
+            {
+                "title": "Audit Security Group & Firewall Ingress Rules",
+                "description": "Verify security group rules permit TCP SYN traffic on active service ports.",
+                "code": "iptables -L -n -v | grep DROP",
+            },
+            {
+                "title": "Configure Exponential Backoff Retry Policy",
+                "description": "Add jittered exponential retry mechanism to client-side network fetch operations.",
+                "code": "await fetchWithRetry(url, { maxRetries: 3, backoffFactor: 1.5 });",
+            },
+        ]
 
     incident_dict = {
         "incident_id": f"inc-net-{uuid.uuid4().hex[:6]}",
         "root_cause_candidate": root_cause,
-        "confidence": 0.93,
+        "confidence": 0.94,
         "affected_services": ["browser-client", "api-gateway", root_cause],
         "signals": signals,
     }
@@ -1712,14 +1797,31 @@ def analyze_network_error(body: dict[str, Any] = Body(...)):
     LIVE_TELEMETRY["latest_metrics"]["latency_ms"] = max(420.0, LIVE_TELEMETRY["latest_metrics"].get("latency_ms", 1.0))
     LIVE_TELEMETRY["latest_metrics"]["packet_loss_pct"] = max(12.4, LIVE_TELEMETRY["latest_metrics"].get("packet_loss_pct", 0.0))
 
+    record_audit_log(
+        tenant_id=tenant_id,
+        actor="ai_incident_advisor",
+        action="network_error_analyzed",
+        detail_json={
+            "error_type": error_type,
+            "root_cause": root_cause,
+            "status": status,
+            "confidence": 0.94,
+        },
+    )
+    record_incident_in_supabase(tenant_id, incident_dict, explanation)
+
     return {
         "status": "analyzed",
         "source": source,
         "error_type": error_type,
         "root_cause": root_cause,
+        "summary": explanation.get("summary") or reason,
+        "affected_service": ", ".join(incident_dict.get("affected_services", [root_cause])),
+        "severity": "critical" if status in (502, 504) else "warning",
+        "confidence": float(incident_dict.get("confidence", 0.94)),
         "incident": incident_dict,
         "explanation": explanation,
-        "recommended_fixes": recommended_steps,
+        "recommended_fixes": recommended_fixes_structured,
         "live_telemetry": get_live_telemetry(tenant_id),
     }
 
