@@ -59,7 +59,7 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
         return {
           section: "Infrastructure",
           title: "Global Regions",
-          subtitle: "Multi-Node Sharding & Residency Audit",
+          subtitle: "Multi-Node Sharding & Residency",
           icon: Globe,
           iconColor: "text-cyan-400",
         };
