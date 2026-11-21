@@ -88,6 +88,13 @@ payload = {'payload_id': str(uuid.uuid4()), 'schema_version': '1.0', 'collector_
 resp = httpx.post('http://localhost:8000/ingest', json={'payloads': [payload]}, headers={'X-Collector-Key': 'test-collector-key-abc123'}); \
 print('✅ Custom External App Ingestion Verified! Status:', resp.status_code, 'Receipt:', resp.json()['receipts'][0])"
 
+send-vision-app: ## Transmit live telemetry from Vision AI application (audio/video inference) into AIOps
+	@docker compose exec -T ingest-api python -c "\
+import httpx, time, uuid; \
+payload = {'payload_id': str(uuid.uuid4()), 'schema_version': '1.0', 'collector_id': 'col-vision-ai-01', 'region': 'ap-south-1', 'event_ts_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'source_tz': 'UTC', 'source_id': 'h_vision_tflite_model', 'kind': 'metric_window', 'window_s': 5, 'metrics': {'cpu_pct': {'avg': 38.2}, 'latency_ms': {'avg': 14.8}, 'fps': {'avg': 30.0}}, 'category': 'ai_inference', 'severity': 'info'}; \
+resp = httpx.post('http://localhost:8000/ingest', json={'payloads': [payload]}, headers={'X-Collector-Key': 'test-collector-key-abc123'}); \
+print('✅ Vision AI Application Ingested into AIOps Cloud! Status:', resp.status_code, 'Receipt:', resp.json()['receipts'][0])"
+
 # ──────────────────── Demo ──────────────────────────────────────────────
 
 .PHONY: demo demo-reset
