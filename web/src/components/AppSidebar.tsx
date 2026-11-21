@@ -22,6 +22,7 @@ import {
   FlaskConical,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
+import ThemeToggle from "@/components/ThemeToggle";
 
 interface AppSidebarProps {
   isCollapsed: boolean;
@@ -405,10 +406,16 @@ export default function AppSidebar({
                 Zero Leak
               </span>
             </div>
+
+            {/* Theme Toggle Pill Switch */}
+            <div className="pt-2">
+              <ThemeToggle />
+            </div>
           </>
         ) : (
           /* Collapsed Footnote Icons */
-          <div className="flex flex-col items-center gap-2.5 py-1">
+          <div className="flex flex-col items-center gap-2 py-1">
+            <ThemeToggle compact />
             {isAuthenticated ? (
               <button
                 onClick={() => {

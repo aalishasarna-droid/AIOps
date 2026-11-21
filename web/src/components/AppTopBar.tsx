@@ -20,6 +20,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { useTenant } from "@/context/TenantContext";
+import ThemeToggle from "@/components/ThemeToggle";
 
 interface AppTopBarProps {
   isCollapsed: boolean;
@@ -162,6 +163,9 @@ export default function AppTopBar({ isCollapsed, onToggleSidebar }: AppTopBarPro
           <div className="text-xs font-mono-code text-[#9AA4B2] bg-white/5 border border-white/10 px-2.5 py-1.5 rounded-lg hidden lg:block">
             {currentTime || "18:00:00 UTC"}
           </div>
+
+          {/* Theme Mode Toggle */}
+          <ThemeToggle compact />
 
           {/* Auth State: Signed In Profile & Sign Out OR Sign In / Create Account */}
           <div className="flex items-center gap-2 relative z-50">
